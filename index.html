@@ -4,8 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>POLYPLASTICS — Task Manager</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+
 <style>
 :root {
   --bg:       #070810;
@@ -24,9 +23,9 @@
   --text:     #e2e6f3;
   --text2:    #8b95b4;
   --text3:    #434d6a;
-  --font-h:   'Syne', sans-serif;
-  --font-b:   'Outfit', sans-serif;
-  --font-m:   'DM Mono', monospace;
+  --font-h:   -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-b:   -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-m:   'Courier New', Courier, monospace;
   --r:        10px;
   --r2:       16px;
 }
@@ -531,6 +530,69 @@ function renderDashboard(){
         })()}
       </div>
     </div>
+    ${(()=>{
+      const emails=[...new Set(tasks.map(t=>(t.assignee||'').toLowerCase()).filter(Boolean))];
+      if(!emails.length)return'';
+      const members=emails.map(email=>{
+        const mt=tasks.filter(t=>(t.assignee||'').toLowerCase()===email);
+        const pending=mt.filter(t=>t.status!=='Done').length;
+        const closed=mt.filter(t=>t.status==='Done').length;
+        const overdue=mt.filter(isOD).length;
+        const name=email.split('@')[0];
+        return{email,name,total:mt.length,pending,closed,overdue};
+      }).sort((a,b)=>b.total-a.total);
+      const maxTotal=Math.max(...members.map(m=>m.total),1);
+      const barH=22,gap=10,svgW=520;
+      const labelW=110,numW=36,barAreaW=svgW-labelW-numW-20;
+      const svgH=members.length*(barH*2+gap)+30;
+      const rows=members.map((m,i)=>{
+        const y=i*(barH*2+gap)+20;
+        const pendW=Math.round((m.pending/maxTotal)*barAreaW);
+        const closedW=Math.round((m.closed/maxTotal)*barAreaW);
+        const nameShort=m.name.length>14?m.name.slice(0,13)+'…':m.name;
+        return`<g>
+          <text x="${labelW-6}" y="${y+barH/2+5}" text-anchor="end" fill="#8b95b4" font-size="11">${nameShort}</text>
+          <rect x="${labelW}" y="${y}" width="${Math.max(pendW,2)}" height="${barH}" rx="4" fill="#6366f1" opacity="0.85"/>
+          ${m.pending>0?`<text x="${labelW+pendW+4}" y="${y+barH/2+5}" fill="#6366f1" font-size="10" font-weight="600">${m.pending}</text>`:''}
+          <text x="${labelW}" y="${y+barH+barH/2+gap/2+5}" text-anchor="start" fill="#434d6a" font-size="9" dy="0"></text>
+          <rect x="${labelW}" y="${y+barH+4}" width="${Math.max(closedW,2)}" height="${barH}" rx="4" fill="#22d3a5" opacity="0.75"/>
+          ${m.closed>0?`<text x="${labelW+closedW+4}" y="${y+barH+4+barH/2+5}" fill="#22d3a5" font-size="10" font-weight="600">${m.closed}</text>`:''}
+          ${m.overdue>0?`<text x="${svgW-4}" y="${y+barH/2+5}" text-anchor="end" fill="#f43f5e" font-size="9" font-weight="700">${m.overdue} late</text>`:''}
+        </g>`;
+      }).join('');
+      return`<div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="section-head" style="margin-bottom:0">User-wise Task Summary</div>
+          <div style="display:flex;gap:14px">
+            <span style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#6366f1"></span>Pending</span>
+            <span style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#22d3a5"></span>Closed</span>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <svg viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:320px;height:auto;display:block">
+            ${rows}
+          </svg>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+          ${members.map(m=>{
+            const pct=m.total?Math.round(m.closed/m.total*100):0;
+            return`<div style="background:var(--bg);border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.name)}</div>
+              <div style="font-size:10px;color:var(--text3);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.email)}</div>
+              <div style="display:flex;gap:8px;margin-bottom:6px">
+                <span style="font-size:11px;color:#6366f1"><strong>${m.pending}</strong> pending</span>
+                <span style="font-size:11px;color:#22d3a5"><strong>${m.closed}</strong> done</span>
+                ${m.overdue?`<span style="font-size:11px;color:var(--red)"><strong>${m.overdue}</strong> late</span>`:''}
+              </div>
+              <div style="background:var(--border);border-radius:3px;height:4px;overflow:hidden">
+                <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#6366f1,#22d3a5);border-radius:3px"></div>
+              </div>
+              <div style="font-size:9px;color:var(--text3);margin-top:3px">${pct}% complete</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    })()}
     ${recent.length?`<div class="card">
       <div class="section-head" style="margin-bottom:12px">Recent Reply Activity</div>
       <table class="tbl"><thead><tr><th>Task</th><th>Last Reply By</th><th>Time</th><th>Status</th></tr></thead><tbody>
