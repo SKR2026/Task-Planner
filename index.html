@@ -168,6 +168,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-b);font-size:
       <div class="nav-section">Config</div>
       <div class="nav-item" id="nav-settings" onclick="showPanel('settings')"><span class="nav-icon">◎</span><span>Settings</span></div>
     </div>
+    <div id="user-nav" style="display:none">
+      <div class="nav-section">My Work</div>
+      <div class="nav-item active" id="nav-mytasks" onclick="goBackUserDash()"><span class="nav-icon">◈</span><span>My Tasks</span></div>
+    </div>
     <div class="sidebar-bottom">
       <div class="nav-item" id="btn-logout" onclick="handleLogout()" style="display:none"><span class="nav-icon">⇥</span><span>Logout</span></div>
     </div>
@@ -249,13 +253,22 @@ function initFB(cfg){
 
 function startListener(){
   if(taskUnsub)taskUnsub();
+  if(!db){setDbIndicator('err');toast('Firebase not initialised','var(--red)');return;}
   const q=query(collection(db,'tasks'),orderBy('createdMs','desc'));
   taskUnsub=onSnapshot(q,snap=>{
     tasks=snap.docs.map(d=>({id:d.id,...d.data()}));
     refreshOverdueBadge();
     onTasksUpdated();
     setDbIndicator('ok');
-  },err=>{console.error(err);setDbIndicator('err');});
+  },err=>{
+    console.error('Firestore error:',err);
+    setDbIndicator('err');
+    if(err.code==='permission-denied'){
+      toast('Firestore permission denied — enable test mode in Firebase Console','var(--red)');
+    } else {
+      toast('DB error: '+err.message,'var(--red)');
+    }
+  });
 }
 
 function onTasksUpdated(){
@@ -398,6 +411,8 @@ function showUserShell(){
   if(av)av.textContent=userEmail[0].toUpperCase();
   if(em)em.textContent=userEmail;
   if(uc)uc.style.display='flex';
+  // Show user nav sidebar
+  document.getElementById('user-nav').style.display='block';
   document.getElementById('content').style.display='';
   document.getElementById('content').innerHTML=`<div style="text-align:center;padding:60px;color:var(--text3)"><div style="font-size:28px;margin-bottom:10px">⟳</div><div>Loading your tasks…</div></div>`;
 }
@@ -460,6 +475,60 @@ function renderDashboard(){
       <div class="card">
         <div class="section-head" style="margin-bottom:10px">Status Breakdown</div>
         ${STATUSES.map(s=>{const n=tasks.filter(t=>t.status===s).length;const pct=total?Math.round(n/total*100):0;return`<div style="margin-bottom:7px"><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:3px"><span>${s}</span><span style="color:${STATUS_CLR[s]}">${n}</span></div><div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${STATUS_CLR[s]}"></div></div></div>`;}).join('')}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div class="card">
+        <div class="section-head" style="margin-bottom:10px">📊 Task Status Chart</div>
+        ${(()=>{
+          const vals=[todo,inprog,review,done];
+          const clrs=['var(--text3)','var(--accent)','var(--purple)','var(--green)'];
+          const labels=['To Do','In Progress','Review','Done'];
+          const max=Math.max(...vals,1);
+          return `<svg viewBox="0 0 220 130" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+            ${vals.map((v,i)=>{
+              const bw=36,gap=12,x=i*(bw+gap)+14,bh=Math.round((v/max)*90),y=110-bh;
+              return `<g>
+                <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="5" fill="${clrs[i]}" opacity="0.85"/>
+                <text x="${x+bw/2}" y="${y-5}" text-anchor="middle" fill="${clrs[i]}" font-size="11" font-weight="700">${v}</text>
+                <text x="${x+bw/2}" y="124" text-anchor="middle" fill="#8b95b4" font-size="8">${labels[i].replace(' ','\n')}</text>
+              </g>`;
+            }).join('')}
+          </svg>`;
+        })()}
+      </div>
+      <div class="card">
+        <div class="section-head" style="margin-bottom:10px">🎯 Priority Distribution</div>
+        ${(()=>{
+          const ph=tasks.filter(t=>t.priority==='High').length;
+          const pm=tasks.filter(t=>t.priority==='Medium').length;
+          const pl=tasks.filter(t=>t.priority==='Low').length;
+          const tot=ph+pm+pl||1;
+          const pHigh=ph/tot,pMed=pm/tot,pLow=pl/tot;
+          // SVG donut chart
+          const cx=65,cy=60,r=45,sw=18;
+          function arc(start,end,color,label,count){
+            if(end-start<0.001)return'';
+            const s2=start*2*Math.PI-Math.PI/2, e2=end*2*Math.PI-Math.PI/2;
+            const x1=cx+r*Math.cos(s2),y1=cy+r*Math.sin(s2);
+            const x2=cx+r*Math.cos(e2),y2=cy+r*Math.sin(e2);
+            const lg=end-start>0.5?1:0;
+            return `<path d="M${cx+r*Math.cos(-Math.PI/2)} ${cy+r*Math.sin(-Math.PI/2)} A${r} ${r} 0 ${lg} 1 ${x2} ${y2}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" transform="rotate(${(start*360)} ${cx} ${cy})" style="transform-origin:${cx}px ${cy}px"/>`;
+          }
+          const hEnd=pHigh, mEnd=pHigh+pMed;
+          return `<div style="display:flex;align-items:center;gap:10px">
+          <svg viewBox="0 0 130 120" xmlns="http://www.w3.org/2000/svg" style="width:130px;flex-shrink:0">
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${sw}"/>
+            ${ph?`<path d="M ${cx} ${cy-r} A ${r} ${r} 0 ${pHigh>0.5?1:0} 1 ${cx+r*Math.cos((pHigh*2-0.5)*Math.PI)} ${cy+r*Math.sin((pHigh*2-0.5)*Math.PI)}" fill="none" stroke="var(--red)" stroke-width="${sw}" stroke-linecap="round"/>`:'' }
+            ${pm?`<path d="M ${cx+r*Math.cos((pHigh*2-0.5)*Math.PI)} ${cy+r*Math.sin((pHigh*2-0.5)*Math.PI)} A ${r} ${r} 0 ${pMed>0.5?1:0} 1 ${cx+r*Math.cos(((pHigh+pMed)*2-0.5)*Math.PI)} ${cy+r*Math.sin(((pHigh+pMed)*2-0.5)*Math.PI)}" fill="none" stroke="var(--amber)" stroke-width="${sw}" stroke-linecap="round"/>`:'' }
+            ${pl?`<path d="M ${cx+r*Math.cos(((pHigh+pMed)*2-0.5)*Math.PI)} ${cy+r*Math.sin(((pHigh+pMed)*2-0.5)*Math.PI)} A ${r} ${r} 0 ${pLow>0.5?1:0} 1 ${cx} ${cy-r}" fill="none" stroke="var(--green)" stroke-width="${sw}" stroke-linecap="round"/>`:'' }
+            <text x="${cx}" y="${cy+4}" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="800">${total}</text>
+            <text x="${cx}" y="${cy+16}" text-anchor="middle" fill="var(--text3)" font-size="8">Tasks</text>
+          </svg>
+          <div style="flex:1">
+            ${[['High',ph,'var(--red)'],['Medium',pm,'var(--amber)'],['Low',pl,'var(--green)']].map(([l,n,c])=>`<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:${c};flex-shrink:0"></div><div style="flex:1"><div style="font-size:11px;color:var(--text2)">${l}</div><div style="font-size:10px;color:var(--text3)">${n} task${n!==1?'s':''}</div></div><div style="font-size:11px;font-weight:700;color:${c}">${total?Math.round(n/total*100):0}%</div></div>`).join('')}
+          </div></div>`;
+        })()}
       </div>
     </div>
     ${recent.length?`<div class="card">
@@ -589,6 +658,34 @@ function renderSettings(){
       <button class="btn btn-primary" onclick="changePwd()">Update Password</button>
     </div>
     <div class="card">
+      <div style="font-weight:700;color:var(--text);margin-bottom:6px">🔔 Reminder Email Frequency</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:13px">Choose how often overdue task reminder emails are sent to employees.</div>
+      <div class="form-group">
+        <label class="form-label">Reminder Frequency</label>
+        <select id="reminder-freq" class="form-select" style="max-width:260px">
+          <option value="none"${(localStorage.getItem('reminder_freq')||'daily')==='none'?' selected':''}>🔕 No Reminders</option>
+          <option value="daily"${(localStorage.getItem('reminder_freq')||'daily')==='daily'?' selected':''}>📅 Daily (every day)</option>
+          <option value="every2days"${(localStorage.getItem('reminder_freq')||'daily')==='every2days'?' selected':''}>📅 Every 2 Days</option>
+          <option value="weekly"${(localStorage.getItem('reminder_freq')||'daily')==='weekly'?' selected':''}>📆 Weekly (every Monday)</option>
+          <option value="biweekly"${(localStorage.getItem('reminder_freq')||'daily')==='biweekly'?' selected':''}>📆 Bi-Weekly</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Remind employees who are</label>
+        <select id="reminder-trigger" class="form-select" style="max-width:260px">
+          <option value="overdue"${(localStorage.getItem('reminder_trigger')||'overdue')==='overdue'?' selected':''}>⚠ Overdue only</option>
+          <option value="due_today"${(localStorage.getItem('reminder_trigger')||'overdue')==='due_today'?' selected':''}>📅 Due today or overdue</option>
+          <option value="due_3days"${(localStorage.getItem('reminder_trigger')||'overdue')==='due_3days'?' selected':''}>📅 Due within 3 days or overdue</option>
+          <option value="all_pending"${(localStorage.getItem('reminder_trigger')||'overdue')==='all_pending'?' selected':''}>📋 All pending tasks</option>
+        </select>
+      </div>
+      <div id="reminder-msg" style="font-size:12px;margin-bottom:9px;min-height:14px"></div>
+      <button class="btn btn-primary" onclick="saveReminderSettings()">💾 Save Reminder Settings</button>
+      <div style="margin-top:12px;background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.12);border-radius:8px;padding:11px 13px;font-size:11px;color:var(--text2)">
+        <strong style="color:var(--accent)">ℹ Note:</strong> Reminder emails require an email sending service (e.g. EmailJS, SendGrid) integrated with your Firebase Cloud Functions. This setting stores your preference — connect an email service to activate sending.
+      </div>
+    </div>
+    <div class="card">
       <div style="font-weight:700;color:var(--text);margin-bottom:6px">🔥 Firebase</div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:13px">Connected to project: <code style="color:var(--accent)">${esc(cfg.projectId||'—')}</code></div>
       <button class="btn btn-ghost btn-sm" onclick="clearFbConfig()">⚙ Reconfigure</button>
@@ -613,6 +710,15 @@ window.changePwd=function(){
   if(nw!==cn){msg.style.color='var(--red)';msg.textContent='❌ Passwords do not match';return;}
   localStorage.setItem(PWD_KEY,nw);msg.style.color='var(--green)';msg.textContent='✅ Password updated';
   ['pc','pn','pm'].forEach(id=>document.getElementById(id).value='');toast('Password updated!');
+};
+window.saveReminderSettings=function(){
+  const freq=document.getElementById('reminder-freq')?.value;
+  const trigger=document.getElementById('reminder-trigger')?.value;
+  if(freq)localStorage.setItem('reminder_freq',freq);
+  if(trigger)localStorage.setItem('reminder_trigger',trigger);
+  const msg=document.getElementById('reminder-msg');
+  if(msg){msg.style.color='var(--green)';msg.textContent='✅ Reminder settings saved!';}
+  toast('Reminder settings saved!');
 };
 
 // ── Task Modal ────────────────────────────────────────────
@@ -643,11 +749,26 @@ window.saveTask=async function(){
   if(!title||!assignee||!due){toast('Title, email & due date required','var(--red)');return;}
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignee)){toast('Invalid email','var(--red)');return;}
   const data={title,desc:document.getElementById('tm-de').value.trim(),assignee,priority:document.getElementById('tm-pr').value,status:document.getElementById('tm-st').value,due};
+  // Disable button to prevent double-submit
+  const btn=document.querySelector('#task-modal .btn-primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…';}
   try{
-    if(editId){await dbUpdate(editId,data);toast('Task updated!');}
-    else{await dbCreate(data);const lnk=userLink(assignee);showLinkModal(assignee,lnk);toast('Task created!');}
+    if(editId){
+      await dbUpdate(editId,data);
+      toast('Task updated!');
+    } else {
+      if(!db){toast('Firebase not connected — check your config','var(--red)');return;}
+      await dbCreate(data);
+      const lnk=userLink(assignee);
+      showLinkModal(assignee,lnk);
+      toast('Task created!');
+    }
     closeModal();
-  }catch(e){toast('Error: '+e.message,'var(--red)');}
+  }catch(e){
+    console.error('saveTask error:',e);
+    toast('Error saving task: '+e.message,'var(--red)');
+    if(btn){btn.disabled=false;btn.textContent=editId?'Update Task':'Create Task';}
+  }
 };
 
 function showLinkModal(email,link){
