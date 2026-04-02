@@ -809,37 +809,51 @@ function deleteTask(id){
 function renderKanban(){
   if(mode==='user'){showPanel('user');return;}
   const c=document.getElementById('content');
-  c.innerHTML=`
-  <div class="panel-title fade-in">Kanban Board</div>
-  <div class="panel-sub">Visual task board — click any card to view details</div>
-  <div class="kanban fade-in">`+
-  STATUSES.map(status=>{
-    const col=tasks.filter(t=>t.status===status);
-    const color=STATUS_COLOR[status];
-    return`<div>
+
+  function kanbanCard(t){
+    try{
+      const overdue = isOverdue(t);
+      const replies = (t.replies||[]).length;
+      const attachments = (t.attachments||[]).length;
+      return `<div class="kanban-card" style="--lc:${PRIO_COLOR[t.priority]||'var(--border)'}" onclick="openDrawer('${t.id}')">
+        <div class="kanban-card-title">${esc(t.title||'Untitled')}</div>
+        <div style="display:flex;gap:5px;margin-bottom:7px;flex-wrap:wrap">
+          <span class="badge ${prioBadgeClass(t.priority)}">${t.priority||''}</span>
+          ${overdue?'<span class="badge badge-overdue">Overdue</span>':''}
+        </div>
+        <div class="kanban-card-meta">
+          <div style="margin-bottom:3px">👤 ${esc(t.assignee||'Unassigned')}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="color:${overdue?'var(--red)':'inherit'}">📅 ${t.due?fmt(t.due):'No date'}</span>
+            <span>${replies?`💬${replies} `:''}${attachments?`📎${attachments}`:''}</span>
+          </div>
+        </div>
+      </div>`;
+    }catch(e){ return ''; }
+  }
+
+  function kanbanCol(status){
+    const col = tasks.filter(t=>t.status===status);
+    const color = STATUS_COLOR[status]||'var(--text3)';
+    const cards = col.map(kanbanCard).join('');
+    const empty = col.length===0
+      ? `<div style="text-align:center;padding:24px 0;color:var(--text3);font-size:12px;border:2px dashed var(--border);border-radius:var(--radius)">Empty</div>`
+      : '';
+    return `<div>
       <div class="kanban-col-header">
         <div class="kanban-dot" style="background:${color}"></div>
         <div class="kanban-col-title" style="color:${color}">${status}</div>
         <div class="kanban-count">${col.length}</div>
       </div>
-      <div>`+col.map(t=>`
-        <div class="kanban-card" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openDrawer('${t.id}')">
-          <div class="kanban-card-title">${t.title}</div>
-          <div style="display:flex;gap:5px;margin-bottom:7px;flex-wrap:wrap">
-            <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
-            ${isOverdue(t)?'<span class="badge badge-overdue">Overdue</span>':''}
-          </div>
-          <div class="kanban-card-meta">
-            <div style="margin-bottom:3px">👤 ${t.assignee}</div>
-            <div style="display:flex;justify-content:space-between">
-              <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">📅 ${fmt(t.due)}</span>
-              <span>${(t.replies||[]).length?`💬${(t.replies||[]).length} `:''} ${(t.attachments||[]).length?`📎${(t.attachments||[]).length}`:''}</span>
-            </div>
-          </div>
-        </div>`).join('')+
-      (col.length===0?`<div style="text-align:center;padding:24px 0;color:var(--text3);font-size:12px;border:2px dashed var(--border);border-radius:var(--radius)">Empty column</div>`:'')+
-      `</div></div>`;
-  }).join('')+`</div>`;
+      <div>${cards}${empty}</div>
+    </div>`;
+  }
+
+  const cols = STATUSES.map(kanbanCol).join('');
+  c.innerHTML = `
+    <div class="panel-title fade-in">Kanban Board</div>
+    <div class="panel-sub">Visual task board — click any card to view details</div>
+    <div class="kanban fade-in">${cols}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
