@@ -330,12 +330,13 @@
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:12px;color:var(--text3);" id="current-date"></span>
+        <button class="btn btn-ghost" id="btn-export" onclick="openExportModal()" style="display:none;">⬇ Export</button>
         <button class="btn btn-ghost" id="btn-bulk-upload" onclick="openBulkUploadModal()" style="display:none;">⬆ Bulk Upload</button>
         <button class="btn btn-primary" id="btn-new-task" onclick="openNewTaskModal()" style="display:none;">+ New Task</button>
         <!-- ── notification bell ── -->
         <div style="position:relative;" id="notif-wrapper">
           <button class="btn-icon" onclick="toggleNotifPanel()" title="Reply notifications" style="font-size:18px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">🔔</button>
-          <span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:50%;width:17px;height:17px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;">0</span>
+          <span id="notif-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:50%;min-width:17px;height:17px;padding:0 4px;font-size:10px;font-weight:700;align-items:center;justify-content:center;">0</span>
           <div id="notif-panel" style="display:none;position:absolute;right:0;top:44px;width:340px;max-height:400px;overflow-y:auto;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);z-index:300;box-shadow:0 8px 32px rgba(0,0,0,.4);">
             <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
               <span style="font-weight:700;font-size:14px;">Reply Notifications</span>
@@ -547,6 +548,7 @@ function setMode(m){
   document.getElementById('admin-nav').style.display=m==='admin'?'block':'none';
   document.getElementById('btn-new-task').style.display=m==='admin'?'flex':'none';
   document.getElementById('btn-bulk-upload').style.display=m==='admin'?'flex':'none';
+  document.getElementById('btn-export').style.display=m==='admin'?'flex':'none';
   // topbar user info
   const uInfo=document.getElementById('topbar-user-info');
   const uEmailEl=document.getElementById('topbar-user-email');
@@ -576,6 +578,7 @@ function showPanel(name){
   if(hit) hit.classList.add('active');
   document.getElementById('btn-new-task').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
   document.getElementById('btn-bulk-upload').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
+  document.getElementById('btn-export').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
   const panels={dashboard:renderDashboard,tasks:renderTasks,mytasks:renderMyTasks,kanban:renderKanban,reminders:renderReminders,team:renderTeam,settings:renderSettings,user:renderUser};
   const fn=panels[name];
   if(fn){ document.getElementById('content').innerHTML=''; fn(); }
@@ -737,7 +740,7 @@ function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();de
 // ═══════════════════════════════════════════════════════════════════════
 //  ALL TASKS
 // ═══════════════════════════════════════════════════════════════════════
-let taskFilters={status:'All',priority:'All',search:''};
+let taskFilters={status:'All',priority:'All',search:'',overdue:false};
 
 function renderTasks(){
   if(mode==='user'){showPanel('user');return;}
@@ -747,13 +750,13 @@ function renderTasks(){
   <div class="panel-sub">${tasks.length} total tasks across all team members</div>
   <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap" class="fade-in">
     <input id="tf-search" class="form-input" style="max-width:280px;padding:9px 13px" placeholder="🔍  Search tasks or members…" value="${taskFilters.search}" oninput="taskFilters.search=this.value;renderTaskRows()"/>
-    <select id="tf-status" class="form-select" style="max-width:160px" onchange="taskFilters.status=this.value;renderTaskRows()">
+    <select id="tf-status" class="form-select" style="max-width:160px" onchange="taskFilters.status=this.value;taskFilters.overdue=false;renderTaskRows()">
       <option>All</option>${STATUSES.map(s=>`<option${taskFilters.status===s?' selected':''}>${s}</option>`).join('')}
     </select>
     <select id="tf-prio" class="form-select" style="max-width:140px" onchange="taskFilters.priority=this.value;renderTaskRows()">
       <option>All</option>${PRIOS.map(p=>`<option${taskFilters.priority===p?' selected':''}>${p}</option>`).join('')}
     </select>
-    <button class="btn btn-ghost btn-sm" onclick="taskFilters={status:'All',priority:'All',search:''};renderTasks()">Reset</button>
+    <button class="btn btn-ghost btn-sm" onclick="taskFilters={status:'All',priority:'All',search:'',overdue:false};renderTasks()">Reset</button>
   </div>
   <div id="task-rows" class="fade-in"></div>`;
   renderTaskRows();
@@ -761,7 +764,7 @@ function renderTasks(){
 
 function renderTaskRows(){
   const filtered=tasks.filter(t=>{
-    const ss=taskFilters.overdue ? isOverdue(t) : (taskFilters.status==='All'||t.status===taskFilters.status);
+    const ss=(taskFilters.overdue===true) ? isOverdue(t) : (taskFilters.status==='All'||t.status===taskFilters.status);
     const sp=taskFilters.priority==='All'||t.priority===taskFilters.priority;
     const sq=!taskFilters.search||t.title.toLowerCase().includes(taskFilters.search.toLowerCase())||t.assignee.toLowerCase().includes(taskFilters.search.toLowerCase());
     return ss&&sp&&sq;
@@ -1187,6 +1190,7 @@ function showAdminLoginScreen(){
   document.getElementById('btn-bulk-upload').style.display = 'none';
   document.getElementById('btn-admin-mode').style.display = 'none';
   document.getElementById('btn-user-mode').style.display = 'none';
+  document.getElementById('btn-export').style.display = 'none';
   // Keep sidebar-bottom visible but hidden so sidebar keeps its width
   const sidebarBottom = document.querySelector('.sidebar-bottom');
   if(sidebarBottom) sidebarBottom.style.visibility = 'hidden';
@@ -1221,6 +1225,7 @@ function adminLogin(){
     document.getElementById('admin-nav').style.display = 'block';
     document.getElementById('btn-admin-mode').style.display = '';
     document.getElementById('btn-user-mode').style.display = '';
+    document.getElementById('btn-export').style.display = 'flex';
     const sidebarBottom = document.querySelector('.sidebar-bottom');
     if(sidebarBottom){ sidebarBottom.style.display = ''; sidebarBottom.style.visibility = ''; }
     toast('Welcome back, Admin! 👋');
@@ -2544,6 +2549,7 @@ if(mode !== 'user'){
     document.getElementById('admin-nav').style.display = 'block';
     document.getElementById('btn-admin-mode').style.display = '';
     document.getElementById('btn-user-mode').style.display = '';
+    document.getElementById('btn-export').style.display = 'flex';
     const sb = document.querySelector('.sidebar-bottom');
     if(sb){ sb.style.display=''; sb.style.visibility=''; }
     showPanel('dashboard');
@@ -2618,7 +2624,7 @@ function refreshNotifBadge(){
   const badge = document.getElementById('notif-badge');
   if(!badge) return;
   if(unread > 0){
-    badge.textContent = unread > 9 ? '9+' : unread;
+    badge.textContent = unread > 9 ? '9+' : String(unread);
     badge.style.display = 'flex';
   } else {
     badge.style.display = 'none';
@@ -2687,6 +2693,135 @@ function goToTasksFiltered(status, priority){
     taskFilters = {status: status, priority: priority || 'All', search:'', overdue:false};
   }
   showPanel('tasks');
+}
+
+
+// ── Export Modal ──────────────────────────────────────────────────────
+function openExportModal(){
+  // Remove any existing
+  const existing = document.getElementById('export-modal-overlay');
+  if(existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'export-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:480px;" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span class="modal-title">⬇ Export Tasks</span>
+        <button class="modal-close" onclick="document.getElementById('export-modal-overlay').remove()">✕</button>
+      </div>
+      <p style="color:var(--text2);font-size:13px;margin-bottom:20px;">Choose a format to download all tasks.</p>
+
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button class="btn btn-ghost" style="justify-content:flex-start;gap:12px;padding:14px 16px;text-align:left;" onclick="exportJSON()">
+          <span style="font-size:22px;">{ }</span>
+          <div>
+            <div style="font-weight:700;color:var(--text);">JSON</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px;">Full data backup — reimportable</div>
+          </div>
+        </button>
+        <button class="btn btn-ghost" style="justify-content:flex-start;gap:12px;padding:14px 16px;text-align:left;" onclick="exportCSV()">
+          <span style="font-size:22px;">📊</span>
+          <div>
+            <div style="font-weight:700;color:var(--text);">CSV</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px;">Open in Excel / Google Sheets</div>
+          </div>
+        </button>
+        <button class="btn btn-ghost" style="justify-content:flex-start;gap:12px;padding:14px 16px;text-align:left;" onclick="exportPDF()">
+          <span style="font-size:22px;">📄</span>
+          <div>
+            <div style="font-weight:700;color:var(--text);">PDF</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px;">Printable task report</div>
+          </div>
+        </button>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('export-modal-overlay').remove()">Cancel</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
+function exportJSON(){
+  const blob = new Blob([JSON.stringify(tasks, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tasks-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  document.getElementById('export-modal-overlay')?.remove();
+  toast('✅ JSON exported!');
+}
+
+function exportCSV(){
+  const headers = ['Title','Assignee','Priority','Status','Due Date','Tags','Description'];
+  const rows = tasks.map(t => [
+    '"' + (t.title||'').replace(/"/g,'""') + '"',
+    '"' + (t.assignee||'').replace(/"/g,'""') + '"',
+    t.priority||'',
+    t.status||'',
+    t.due||'',
+    '"' + (Array.isArray(t.tags)?t.tags.join(', '):(t.tags||'')).replace(/"/g,'""') + '"',
+    '"' + (t.desc||t.description||'').replace(/"/g,'""') + '"'
+  ]);
+  const csv = [headers.join(','), ...rows.map(r=>r.join(','))].join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tasks-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  document.getElementById('export-modal-overlay')?.remove();
+  toast('✅ CSV exported!');
+}
+
+function exportPDF(){
+  const date = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const statusColor = {'To Do':'#9ca3af','In Progress':'#5b8dee','Review':'#a78bfa','Done':'#34d399'};
+  const prioColor = {'High':'#f87171','Medium':'#fbbf24','Low':'#34d399'};
+
+  const rows = tasks.map(t => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111;">${(t.title||'').replace(/</g,'&lt;')}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${(t.assignee||'').replace(/</g,'&lt;')}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">
+        <span style="background:${prioColor[t.priority]||'#ccc'}22;color:${prioColor[t.priority]||'#555'};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">${t.priority||''}</span>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">
+        <span style="background:${statusColor[t.status]||'#ccc'}22;color:${statusColor[t.status]||'#555'};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">${t.status||''}</span>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${t.due||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${(Array.isArray(t.tags)?t.tags.join(', '):(t.tags||''))}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>Task Report — ${date}</title>
+  <style>
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#111;margin:0;padding:24px;}
+    h1{font-size:22px;margin-bottom:4px;color:#1a1e2e;}
+    .sub{font-size:13px;color:#888;margin-bottom:20px;}
+    table{width:100%;border-collapse:collapse;}
+    th{background:#f3f4f6;padding:9px 10px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#6b7280;border-bottom:2px solid #e5e7eb;}
+    tr:nth-child(even) td{background:#fafafa;}
+    @media print{body{padding:0;}}
+  </style></head><body>
+  <h1>📋 Task Report</h1>
+  <div class="sub">Generated on ${date} &nbsp;·&nbsp; Total: ${tasks.length} tasks</div>
+  <table>
+    <thead><tr>
+      <th>Title</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Tags</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <script>window.onload=()=>window.print();<\/script>
+  </body></html>`;
+
+  const w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
+  document.getElementById('export-modal-overlay')?.remove();
+  toast('✅ PDF report opened — print to save!');
 }
 
 </script>
