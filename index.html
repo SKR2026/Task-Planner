@@ -778,9 +778,9 @@ function renderTaskRows(){
         <div class="task-meta">
           <span>👤 ${t.assignee}</span>
           <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
-          ${t.replies.length?`<span>💬 ${t.replies.length}</span>`:''}
-          ${t.attachments.length?`<span>📎 ${t.attachments.length}</span>`:''}
-          ${t.reminder!=='none'?`<span>🔔 ${t.reminder}</span>`:''}
+          ${(t.replies||[]).length?`<span>💬 ${(t.replies||[]).length}</span>`:''}
+          ${(t.attachments||[]).length?`<span>📎 ${(t.attachments||[]).length}</span>`:''}
+          ${t.reminder&&t.reminder!=='none'?`<span>🔔 ${t.reminder}</span>`:''}
           ${t.tags&&t.tags.length?t.tags.map(tag=>`<span style="background:rgba(91,141,238,.1);color:var(--accent);border:1px solid rgba(91,141,238,.2);border-radius:4px;padding:1px 6px;font-size:10px">${tag}</span>`).join(''):''}
         </div>
       </div>
@@ -833,7 +833,7 @@ function renderKanban(){
             <div style="margin-bottom:3px">👤 ${t.assignee}</div>
             <div style="display:flex;justify-content:space-between">
               <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">📅 ${fmt(t.due)}</span>
-              <span>${t.replies.length?`💬${t.replies.length} `:''} ${t.attachments.length?`📎${t.attachments.length}`:''}</span>
+              <span>${(t.replies||[]).length?`💬${(t.replies||[]).length} `:''} ${(t.attachments||[]).length?`📎${(t.attachments||[]).length}`:''}</span>
             </div>
           </div>
         </div>`).join('')+
@@ -848,7 +848,7 @@ function renderKanban(){
 function renderReminders(){
   if(mode==='user'){showPanel('user');return;}
   const c=document.getElementById('content');
-  const active=tasks.filter(t=>t.reminder!=='none'&&t.status!=='Done');
+  const active=tasks.filter(t=>t.reminder&&t.reminder!=='none'&&t.status!=='Done');
   const overdue=tasks.filter(isOverdue);
   c.innerHTML=`
   <div class="panel-title fade-in">Reminders & Notifications</div>
@@ -1346,7 +1346,7 @@ async function sendAllReminders(){
     toast('Configure EmailJS in Settings first','var(--amber)');
     return;
   }
-  const active=tasks.filter(t=>t.reminder!=='none'&&t.status!=='Done');
+  const active=tasks.filter(t=>t.reminder&&t.reminder!=='none'&&t.status!=='Done');
   if(!active.length){toast('No active reminders to send','var(--amber)');return;}
   toast('Sending '+active.length+' reminder emails…','var(--accent)');
   let sent=0,failed=0;
@@ -1502,7 +1502,7 @@ function renderUserDashboard(c){
           <div class="task-title">${t.title}</div>
           <div class="task-meta">
             <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
-            ${t.replies.length?`<span>💬 ${t.replies.length}</span>`:''}
+            ${(t.replies||[]).length?`<span>💬 ${(t.replies||[]).length}</span>`:''}
             ${isOverdue(t)?'<span style="color:var(--red);font-weight:600">Overdue</span>':''}
           </div>
         </div>
@@ -1595,9 +1595,9 @@ function renderUserTask(c){
 
       ${t.desc?`<div class="card" style="margin-bottom:14px;padding:16px"><div class="section-head" style="margin-bottom:8px">Description</div><div style="font-size:14px;color:var(--text2);line-height:1.7">${t.desc}</div></div>`:''}
 
-      ${t.attachments.length?`
+      ${(t.attachments||[]).length?`
       <div class="card" style="margin-bottom:14px;padding:16px">
-        <div class="section-head" style="margin-bottom:10px">📎 Task Attachments (${t.attachments.length})</div>
+        <div class="section-head" style="margin-bottom:10px">📎 Task Attachments (${(t.attachments||[]).length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:7px">
           ${t.attachments.map(a=>`<div class="attach-chip">📄 ${a.name} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></div>`).join('')}
         </div>
@@ -1614,9 +1614,9 @@ function renderUserTask(c){
       ${t.tags&&t.tags.length?`<div class="card" style="margin-bottom:14px;padding:16px"><div class="section-head" style="margin-bottom:8px">🏷 Tags</div><div style="display:flex;flex-wrap:wrap;gap:6px">${t.tags.map(tag=>`<span style="background:rgba(91,141,238,.1);color:var(--accent);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:3px 10px;font-size:12px">${tag}</span>`).join('')}</div></div>`:''}
 
       <div class="card" style="margin-bottom:14px;padding:16px">
-        <div class="section-head" style="margin-bottom:12px">💬 Activity & Replies (${t.replies.length})</div>
+        <div class="section-head" style="margin-bottom:12px">💬 Activity & Replies (${(t.replies||[]).length})</div>
         <div id="user-replies">
-          ${t.replies.length?t.replies.map(r=>`
+          ${(t.replies||[]).length?(t.replies||[]).map(r=>`
           <div class="reply-item">
             <div><span class="reply-author">${r.author}</span><span class="reply-time">${fmtTime(r.time)}</span></div>
             ${r.text?`<div class="reply-text">${r.text}</div>`:''}
@@ -1753,16 +1753,16 @@ function renderDrawerContent(){
     </div>
   </div>
 
-  ${t.attachments.length?`
+  ${(t.attachments||[]).length?`
   <div class="card-sm" style="margin-bottom:14px">
-    <div class="section-head" style="margin-bottom:8px">📎 Attachments (${t.attachments.length})</div>
+    <div class="section-head" style="margin-bottom:8px">📎 Attachments (${(t.attachments||[]).length})</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
       ${t.attachments.map(a=>`<div class="attach-chip">📄 ${a.name}</div>`).join('')}
     </div>
   </div>`:''}
 
   <div style="margin-bottom:14px">
-    <div class="section-head" style="margin-bottom:10px">💬 Replies (${t.replies.length})</div>
+    <div class="section-head" style="margin-bottom:10px">💬 Replies (${(t.replies||[]).length})</div>
     <div id="drawer-replies">
       ${t.replies.map(r=>`
       <div class="reply-item">
@@ -2687,12 +2687,20 @@ refreshNotifBadge();
 // ── Dashboard stat cards → filtered task list ─────────────────────────
 function goToTasksFiltered(status, priority){
   if(status === 'overdue'){
-    // special: show overdue
     taskFilters = {status:'All', priority:'All', search:'', overdue:true};
   } else {
-    taskFilters = {status: status, priority: priority || 'All', search:'', overdue:false};
+    taskFilters = {status: status || 'All', priority: priority || 'All', search:'', overdue:false};
   }
-  showPanel('tasks');
+  // Use showPanel to navigate, then re-apply filter after render
+  currentPanel = 'tasks';
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  const hit=document.querySelector('.nav-item[onclick*="tasks"]');
+  if(hit) hit.classList.add('active');
+  document.getElementById('btn-new-task').style.display='flex';
+  document.getElementById('btn-bulk-upload').style.display='flex';
+  document.getElementById('btn-export').style.display='flex';
+  document.getElementById('topbar-title').textContent='All Tasks';
+  renderTasks();
 }
 
 
