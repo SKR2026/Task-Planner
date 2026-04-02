@@ -1315,7 +1315,7 @@ function showAdminLoginScreen(){
       </div>
       <div id="admin-login-error" style="color:var(--red);font-size:13px;margin-bottom:10px;display:none">❌ Incorrect password. Try again.</div>
       <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="adminLogin()">🔓 Login</button>
-      <div style="font-size:11px;color:var(--text3);margin-top:12px;text-align:center">Default password: <code style="background:var(--card);padding:1px 6px;border-radius:4px">admin123</code></div>
+
     </div>
   </div>`;
   setTimeout(()=>document.getElementById('admin-pwd-input')?.focus(), 50);
@@ -1337,15 +1337,23 @@ function adminLogin(){
     toast('Welcome back, Admin! 👋');
     showPanel('dashboard');
   };
-  // Try Firestore password first, fall back to localStorage
+  // Try Firestore password first, fall back to localStorage.
+  // If no password has ever been configured, deny access (no default fallback).
   if(_fbReady&&_db){
     _db.collection('settings').doc('admin').get().then(d=>{
-      const stored = (d.exists&&d.data().password) ? d.data().password : (localStorage.getItem('admin_password')||'admin123');
-      localStorage.setItem('admin_password',stored); // keep in sync
+      const stored = (d.exists&&d.data().password) ? d.data().password : localStorage.getItem('admin_password');
+      if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+      localStorage.setItem('admin_password',stored);
       doLogin(stored);
-    }).catch(()=>{ doLogin(localStorage.getItem('admin_password')||'admin123'); });
+    }).catch(()=>{
+      const stored = localStorage.getItem('admin_password');
+      if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+      doLogin(stored);
+    });
   } else {
-    doLogin(localStorage.getItem('admin_password')||'admin123');
+    const stored = localStorage.getItem('admin_password');
+    if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+    doLogin(stored);
   }
 }
 
@@ -1355,12 +1363,12 @@ function handleLogout(){
     if(!confirm('Log out?'))return;
     userEmail='';
     userTask=null;
+    // Keep mode as 'user' — do NOT switch to admin after user logout
+    // This prevents any path to the admin login screen from the user session
     const uInfo=document.getElementById('topbar-user-info');
     const avatar=document.getElementById('topbar-avatar');
     if(uInfo) uInfo.style.display='none';
-    if(avatar){ avatar.textContent='A'; avatar.style.background='linear-gradient(135deg,var(--accent),var(--purple))'; }
-    mode='admin';
-    // Show a clean "logged out" screen — do NOT expose admin unless authenticated
+    if(avatar){ avatar.textContent='U'; avatar.style.background='linear-gradient(135deg,var(--accent),var(--purple))'; }
     document.getElementById('admin-nav').style.display='none';
     document.getElementById('btn-new-task').style.display='none';
     document.getElementById('btn-bulk-upload').style.display='none';
@@ -1903,7 +1911,7 @@ function changeAdminPassword(){
   const current=document.getElementById('pwd-current').value;
   const newPwd=document.getElementById('pwd-new').value;
   const confirm=document.getElementById('pwd-confirm').value;
-  const stored=localStorage.getItem('admin_password')||'admin123';
+  const stored=localStorage.getItem('admin_password')||'';
   const statusEl=document.getElementById('pwd-status');
   if(current!==stored){statusEl.style.color='var(--red)';statusEl.textContent='❌ Current password is incorrect';return;}
   if(newPwd.length<6){statusEl.style.color='var(--red)';statusEl.textContent='❌ New password must be at least 6 characters';return;}
