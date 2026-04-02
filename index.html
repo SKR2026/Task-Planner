@@ -8,34 +8,6 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-<!-- Firebase SDK -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
-  import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
-    authDomain: "skr-task.firebaseapp.com",
-    projectId: "skr-task",
-    storageBucket: "skr-task.firebasestorage.app",
-    messagingSenderId: "1011690659933",
-    appId: "1:1011690659933:web:f57e43ee0267a475682db4",
-    measurementId: "G-67NGHMK0QR"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-  const db = getFirestore(app);
-  const auth = getAuth(app);
-
-  // Expose to global scope for use elsewhere in the app
-  window.firebaseApp = app;
-  window.firebaseDB = db;
-  window.firebaseAuth = auth;
-  window.firebaseAnalytics = analytics;
-</script>
 <style>
   :root {
     --bg:        #08090d;
@@ -340,7 +312,7 @@
     <!-- topbar -->
     <div id="topbar">
       <div style="display:flex;align-items:center;gap:10px;">
-        <div style="width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);flex-shrink:0;"></div>
+        <div id="fb-dot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber);flex-shrink:0;" title="Firebase: connecting..."></div>
         <div id="topbar-title" style="font-family:var(--font-head);font-weight:700;font-size:16px;color:var(--text);">Dashboard</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
@@ -386,6 +358,87 @@ const SEED = [
   {id:uid(),title:"Update privacy policy GDPR",desc:"Update privacy policy to comply with new GDPR guidelines for EU users.",assignee:"arjun@example.com",priority:"Medium",status:"Done",due:"2026-03-20",created:"2026-03-01",token:uid(),replies:[],attachments:[],reminder:"none",tags:["legal"]},
 ];
 
+// ── Firebase Setup ────────────────────────────────────────────────────
+const _fbConfig = {
+  apiKey: "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
+  authDomain: "skr-task.firebaseapp.com",
+  projectId: "skr-task",
+  storageBucket: "skr-task.firebasestorage.app",
+  messagingSenderId: "1011690659933",
+  appId: "1:1011690659933:web:f57e43ee0267a475682db4",
+  measurementId: "G-67NGHMK0QR"
+};
+
+let _db = null;
+let _fbReady = false;
+let _unsubscribeTasks = null;
+
+(function initFirebase() {
+  const s1 = document.createElement('script');
+  s1.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js';
+  s1.onload = () => {
+    const s2 = document.createElement('script');
+    s2.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js';
+    s2.onload = () => {
+      try {
+        if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
+        _db = firebase.firestore();
+        _fbReady = true;
+
+        // Load persisted settings from Firestore
+        _db.collection('settings').doc('admin').get().then(d=>{
+          if(d.exists&&d.data().password) localStorage.setItem('admin_password',d.data().password);
+        }).catch(()=>{});
+        _db.collection('settings').doc('emailjs').get().then(d=>{
+          if(d.exists){
+            const s=d.data();
+            if(s.service)   localStorage.setItem('ejs_service',s.service);
+            if(s.template)  localStorage.setItem('ejs_template',s.template);
+            if(s.key)       localStorage.setItem('ejs_key',s.key);
+            if(s.testEmail) localStorage.setItem('ejs_test_email',s.testEmail);
+          }
+        }).catch(()=>{});
+        // Subscribe to real-time task updates
+        _unsubscribeTasks = _db.collection('tasks').onSnapshot(snap => {
+          // Mark connected
+          const dot=document.getElementById('fb-dot');
+          if(dot){dot.style.background='var(--green)';dot.style.boxShadow='0 0 8px var(--green)';dot.title='Firebase: connected ✓';}
+          const sdot=document.getElementById('fb-settings-dot');
+          const slbl=document.getElementById('fb-settings-label');
+          if(sdot){sdot.style.background='var(--green)';sdot.style.boxShadow='0 0 8px var(--green)';}
+          if(slbl){slbl.style.color='var(--green)';slbl.textContent='Connected to Firebase ✓ — '+snap.docs.length+' task(s) synced';}
+          if (snap.empty && tasks.length === 0) {
+            // First run — seed Firestore with demo data
+            const batch = _db.batch();
+            SEED.forEach(t => batch.set(_db.collection('tasks').doc(t.id), t));
+            batch.commit();
+          } else if (!snap.empty) {
+            tasks = snap.docs.map(d => d.data());
+            refreshOverdueBadge();
+            if (currentPanel === 'dashboard') renderDashboard();
+            else if (currentPanel === 'tasks') renderTasks();
+            else if (currentPanel === 'kanban') renderKanban();
+          }
+        }, err => {
+          const dot=document.getElementById('fb-dot');
+          if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: error — '+err.message;}
+          const sdot=document.getElementById('fb-settings-dot');
+          const slbl=document.getElementById('fb-settings-label');
+          if(sdot){sdot.style.background='var(--red)';sdot.style.boxShadow='0 0 8px var(--red)';}
+          if(slbl){slbl.style.color='var(--red)';slbl.textContent='Firebase error: '+err.message;}
+          console.warn('Firestore error:', err);
+        });
+      } catch(e) {
+        const dot=document.getElementById('fb-dot');
+        if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: init failed';}
+        console.warn('Firebase init error:', e);
+      }
+    };
+    document.head.appendChild(s2);
+  };
+  document.head.appendChild(s1);
+})();
+
 // ── state ─────────────────────────────────────────────────────────────
 let tasks = JSON.parse(localStorage.getItem('tf_tasks') || 'null') || SEED;
 let mode = 'admin'; // 'admin' | 'user'
@@ -395,9 +448,27 @@ let editTaskId = null;
 let pendingFiles = []; // file objects waiting to attach
 let chartInstances = {};
 
-function saveTasks() { localStorage.setItem('tf_tasks',JSON.stringify(tasks)); }
+function saveTasks() {
+  localStorage.setItem('tf_tasks', JSON.stringify(tasks));
+  if (_fbReady && _db) {
+    const batch = _db.batch();
+    tasks.forEach(t => batch.set(_db.collection('tasks').doc(t.id), t));
+    // Delete removed tasks: get all Firestore IDs and remove ones not in tasks
+    _db.collection('tasks').get().then(snap => {
+      const localIds = new Set(tasks.map(t => t.id));
+      snap.docs.forEach(d => { if (!localIds.has(d.id)) d.ref.delete(); });
+    });
+    batch.commit().catch(e => console.warn('saveTasks batch error:', e));
+  }
+}
 function getTask(id) { return tasks.find(t=>t.id===id); }
-function updateTask(t) { tasks = tasks.map(x=>x.id===t.id?t:x); saveTasks(); }
+function updateTask(t) {
+  tasks = tasks.map(x=>x.id===t.id?t:x);
+  localStorage.setItem('tf_tasks', JSON.stringify(tasks));
+  if (_fbReady && _db) {
+    _db.collection('tasks').doc(t.id).set(t).catch(e => console.warn('updateTask error:', e));
+  }
+}
 
 // priority / status helpers
 const PRIO_COLOR = {High:'var(--red)',Medium:'var(--amber)',Low:'var(--green)'};
@@ -536,10 +607,11 @@ function renderDashboard(){
     </div>
   </div>
 
-  <div class="charts-grid fade-in">
+  <div class="charts-grid fade-in" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
     <div class="card"><div class="section-head" style="margin-bottom:12px">By Status</div><div class="chart-wrap"><canvas id="ch-status"></canvas></div></div>
     <div class="card"><div class="section-head" style="margin-bottom:12px">By Priority</div><div class="chart-wrap"><canvas id="ch-prio"></canvas></div></div>
     <div class="card"><div class="section-head" style="margin-bottom:12px">Weekly Trend</div><div class="chart-wrap"><canvas id="ch-trend"></canvas></div></div>
+    <div class="card"><div class="section-head" style="margin-bottom:12px">Tasks by Assignee</div><div class="chart-wrap"><canvas id="ch-assignee"></canvas></div></div>
   </div>
 
   <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px" class="fade-in">
@@ -571,10 +643,51 @@ function renderDashboard(){
     destroyChart('ch-prio');
     chartInstances['ch-prio']=new Chart(document.getElementById('ch-prio'),{type:'bar',data:prioData,options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}});
 
-    const weeks=['5w ago','4w ago','3w ago','2w ago','Last wk','This wk'];
-    const trendVals=[2,4,3,6,5,done||1];
+    // Weekly trend — count tasks created per week for last 6 weeks
+    const now=new Date();
+    const weeks=[]; const trendVals=[];
+    for(let i=5;i>=0;i--){
+      const wStart=new Date(now); wStart.setDate(now.getDate()-now.getDay()-(i*7));
+      const wEnd=new Date(wStart); wEnd.setDate(wStart.getDate()+6);
+      const ws=wStart.toISOString().slice(0,10); const we=wEnd.toISOString().slice(0,10);
+      trendVals.push(tasks.filter(t=>t.created&&t.created>=ws&&t.created<=we).length);
+      weeks.push(i===0?'This wk':i===1?'Last wk':(i+'w ago'));
+    }
     destroyChart('ch-trend');
-    chartInstances['ch-trend']=new Chart(document.getElementById('ch-trend'),{type:'line',data:{labels:weeks,datasets:[{data:trendVals,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.08)',tension:.4,fill:true,pointBackgroundColor:'#34d399',pointRadius:4}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}});
+    chartInstances['ch-trend']=new Chart(document.getElementById('ch-trend'),{type:'line',data:{labels:weeks,datasets:[{data:trendVals,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.08)',tension:.4,fill:true,pointBackgroundColor:'#34d399',pointRadius:4}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:10},stepSize:1},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}});
+
+    // assignee chart
+    const assigneeMap={};
+    tasks.forEach(t=>{
+      if(!t.assignee) return;
+      const name=t.assignee.split('@')[0]; // shorten email to name part
+      assigneeMap[name]=(assigneeMap[name]||0)+1;
+    });
+    const aLabels=Object.keys(assigneeMap);
+    const aVals=Object.values(assigneeMap);
+    const aColors=['rgba(91,141,238,.75)','rgba(167,139,250,.75)','rgba(52,211,153,.75)','rgba(251,191,36,.75)','rgba(248,113,113,.75)','rgba(34,211,238,.75)','rgba(249,115,22,.75)','rgba(16,185,129,.75)'];
+    destroyChart('ch-assignee');
+    chartInstances['ch-assignee']=new Chart(document.getElementById('ch-assignee'),{
+      type:'bar',
+      data:{
+        labels:aLabels,
+        datasets:[{
+          data:aVals,
+          backgroundColor:aLabels.map((_,i)=>aColors[i%aColors.length]),
+          borderRadius:5,
+          borderWidth:0
+        }]
+      },
+      options:{
+        indexAxis:'y',
+        plugins:{legend:{display:false}},
+        scales:{
+          x:{ticks:{color:'#9aa5c0',font:{size:10},stepSize:1},grid:{color:'rgba(255,255,255,.04)'}},
+          y:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{display:false}}
+        },
+        maintainAspectRatio:false
+      }
+    });
 
     // team table
     const byPerson=[...new Set(tasks.map(t=>t.assignee))].map(e=>({email:e,total:tasks.filter(t=>t.assignee===e).length,done:tasks.filter(t=>t.assignee===e&&t.status==='Done').length}));
@@ -654,7 +767,9 @@ function renderTaskRows(){
 function deleteTask(id){
   if(!confirm('Delete this task permanently?'))return;
   tasks=tasks.filter(t=>t.id!==id);
-  saveTasks(); renderTaskRows(); refreshOverdueBadge();
+  localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+  if(_fbReady&&_db) _db.collection('tasks').doc(id).delete().catch(e=>console.warn('delete error',e));
+  renderTaskRows(); refreshOverdueBadge();
   toast('Task deleted','var(--red)');
 }
 
@@ -889,6 +1004,18 @@ function renderSettings(){
     </div>
 
     <div class="card" style="background:var(--bg);border-style:dashed">
+      <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:10px">🔥 Firebase / Firestore Status</div>
+      <div id="fb-settings-status" style="font-size:13px;color:var(--text2);line-height:1.9">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div id="fb-settings-dot" style="width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber);flex-shrink:0"></div>
+          <span id="fb-settings-label" style="font-weight:600">Connecting to Firebase…</span>
+        </div>
+        <div style="font-size:12px;color:var(--text3)">Project: <code style="background:var(--card);padding:1px 6px;border-radius:4px">skr-task</code> &nbsp;·&nbsp; Collection: <code style="background:var(--card);padding:1px 6px;border-radius:4px">tasks</code></div>
+        <div style="margin-top:8px;font-size:12px;color:var(--text3)">All tasks, edits, and deletions sync in real-time across every device that has this page open.</div>
+      </div>
+    </div>
+
+    <div class="card" style="background:var(--bg);border-style:dashed">
       <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:10px">🚀 GitHub Pages Hosting Guide</div>
       <div style="font-size:13px;color:var(--text2);line-height:1.9">
         <div style="margin-bottom:8px"><strong style="color:var(--accent)">Step 1:</strong> Go to <a href="https://github.com/new" style="color:var(--accent)" target="_blank">github.com/new</a> → create repo named <code style="background:var(--card);padding:1px 6px;border-radius:4px">task-planner</code></div>
@@ -901,10 +1028,15 @@ function renderSettings(){
 }
 
 function saveEmailSettings(){
-  localStorage.setItem('ejs_service',document.getElementById('ejs-service').value);
-  localStorage.setItem('ejs_template',document.getElementById('ejs-template').value);
-  localStorage.setItem('ejs_key',document.getElementById('ejs-key').value);
-  localStorage.setItem('ejs_test_email',document.getElementById('ejs-test-email').value||'');
+  const service=document.getElementById('ejs-service').value;
+  const template=document.getElementById('ejs-template').value;
+  const key=document.getElementById('ejs-key').value;
+  const testEmail=document.getElementById('ejs-test-email').value||'';
+  localStorage.setItem('ejs_service',service);
+  localStorage.setItem('ejs_template',template);
+  localStorage.setItem('ejs_key',key);
+  localStorage.setItem('ejs_test_email',testEmail);
+  if(_fbReady&&_db) _db.collection('settings').doc('emailjs').set({service,template,key,testEmail},{merge:true}).catch(e=>console.warn('email settings save error',e));
   toast('Email settings saved!');
 }
 
@@ -1052,17 +1184,27 @@ function showAdminLoginScreen(){
 
 function adminLogin(){
   const entered = document.getElementById('admin-pwd-input').value;
-  const stored = localStorage.getItem('admin_password') || 'admin123';
   const err = document.getElementById('admin-login-error');
-  if(entered !== stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
-  err.style.display='none';
-  adminAuthenticated = true;
-  // Restore sidebar
-  document.getElementById('admin-nav').style.display = 'block';
-  const sidebarBottom = document.querySelector('.sidebar-bottom');
-  if(sidebarBottom) sidebarBottom.style.display = '';
-  toast('Welcome back, Admin! 👋');
-  showPanel('dashboard');
+  const doLogin = (stored) => {
+    if(entered !== stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+    err.style.display='none';
+    adminAuthenticated = true;
+    document.getElementById('admin-nav').style.display = 'block';
+    const sidebarBottom = document.querySelector('.sidebar-bottom');
+    if(sidebarBottom) sidebarBottom.style.display = '';
+    toast('Welcome back, Admin! 👋');
+    showPanel('dashboard');
+  };
+  // Try Firestore password first, fall back to localStorage
+  if(_fbReady&&_db){
+    _db.collection('settings').doc('admin').get().then(d=>{
+      const stored = (d.exists&&d.data().password) ? d.data().password : (localStorage.getItem('admin_password')||'admin123');
+      localStorage.setItem('admin_password',stored); // keep in sync
+      doLogin(stored);
+    }).catch(()=>{ doLogin(localStorage.getItem('admin_password')||'admin123'); });
+  } else {
+    doLogin(localStorage.getItem('admin_password')||'admin123');
+  }
 }
 
 // ── Logout ────────────────────────────────────────────────────────────
@@ -1193,7 +1335,14 @@ function importData(){
       try{
         const imported=JSON.parse(ev.target.result);
         if(!Array.isArray(imported)){toast('Invalid format: expected an array of tasks','var(--red)');return;}
-        tasks=imported; saveTasks(); showPanel('dashboard'); toast('Tasks imported successfully!');
+        tasks=imported;
+        localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+        if(_fbReady&&_db){
+          const batch=_db.batch();
+          tasks.forEach(t=>batch.set(_db.collection('tasks').doc(t.id),t));
+          batch.commit().catch(e=>console.warn('importData batch error',e));
+        }
+        showPanel('dashboard'); toast('Tasks imported successfully!');
       }catch{toast('Invalid JSON file — could not parse','var(--red)');}
     };fr.readAsText(e.target.files[0]);
   };inp.click();
@@ -1202,7 +1351,17 @@ function importData(){
 function resetData(){
   if(!confirm('Reset all tasks to demo data? This cannot be undone.'))return;
   tasks=JSON.parse(JSON.stringify(SEED)).map(t=>({...t,id:uid(),token:uid()}));
-  saveTasks(); showPanel('dashboard'); toast('Reset to demo data');
+  localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+  if(_fbReady&&_db){
+    // Clear existing docs then write fresh
+    _db.collection('tasks').get().then(snap=>{
+      const batch=_db.batch();
+      snap.docs.forEach(d=>batch.delete(d.ref));
+      tasks.forEach(t=>batch.set(_db.collection('tasks').doc(t.id),t));
+      batch.commit().catch(e=>console.warn('resetData batch error',e));
+    });
+  }
+  showPanel('dashboard'); toast('Reset to demo data');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1607,6 +1766,7 @@ function changeAdminPassword(){
   if(newPwd.length<6){statusEl.style.color='var(--red)';statusEl.textContent='❌ New password must be at least 6 characters';return;}
   if(newPwd!==confirm){statusEl.style.color='var(--red)';statusEl.textContent='❌ Passwords do not match';return;}
   localStorage.setItem('admin_password',newPwd);
+  if(_fbReady&&_db) _db.collection('settings').doc('admin').set({password:newPwd},{merge:true}).catch(e=>console.warn('pwd save error',e));
   statusEl.style.color='var(--green)';statusEl.textContent='✅ Password updated successfully';
   document.getElementById('pwd-current').value='';
   document.getElementById('pwd-new').value='';
@@ -1622,7 +1782,9 @@ function editFromDrawer(id){
 function deleteTaskFromDrawer(id){
   if(!confirm('Delete this task permanently? This cannot be undone.'))return;
   tasks=tasks.filter(t=>t.id!==id);
-  saveTasks(); refreshOverdueBadge();
+  localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+  if(_fbReady&&_db) _db.collection('tasks').doc(id).delete().catch(e=>console.warn('delete error',e));
+  refreshOverdueBadge();
   closeDrawer();
   toast('Task deleted','var(--red)');
   showPanel(currentPanel);
@@ -1746,7 +1908,9 @@ function saveTask(){
     if(changes.length===0) toast('Task updated (no changes to notify).');
   } else {
     const nt={id:uid(),title,desc:document.getElementById('tm-desc').value,assignee,priority:document.getElementById('tm-priority').value,status:document.getElementById('tm-status').value,due,created:today(),token:uid(),replies:[],attachments:[],reminder:document.getElementById('tm-reminder').value,tags};
-    tasks=[nt,...tasks]; saveTasks();
+    tasks=[nt,...tasks];
+    localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+    if(_fbReady&&_db) _db.collection('tasks').doc(nt.id).set(nt).catch(e=>console.warn('addTask error',e));
     const cfg=getEmailConfig();
     if(cfg.service&&cfg.template&&cfg.key){
       // EmailJS configured — send automatically
@@ -1956,7 +2120,9 @@ function quickStatusCycle(id){
 
 function deleteMyTask(id){
   if(!confirm('Delete this task?')) return;
-  tasks=tasks.filter(t=>t.id!==id); saveTasks();
+  tasks=tasks.filter(t=>t.id!==id);
+  localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+  if(_fbReady&&_db) _db.collection('tasks').doc(id).delete().catch(e=>console.warn('deleteMyTask error',e));
   const se=mode==='user'?(userEmail||''):(localStorage.getItem('self_email')||'');
   renderMyTaskList(se); refreshOverdueBadge(); toast('Deleted');
 }
@@ -2028,7 +2194,9 @@ function saveSelfTask(editId,selfEmail){
       status:document.getElementById('st-status').value,
       due,created:today(),token:uid(),replies:[],attachments:[],
       reminder:document.getElementById('st-reminder').value,tags};
-    tasks=[nt,...tasks]; saveTasks();
+    tasks=[nt,...tasks];
+    localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+    if(_fbReady&&_db) _db.collection('tasks').doc(nt.id).set(nt).catch(e=>console.warn('saveSelfTask error',e));
     toast('Task added ✅ — no email sent');
   }
   closeSelfTaskModal(); refreshOverdueBadge(); renderMyTaskList(selfEmail);
@@ -2269,7 +2437,12 @@ function importBulk(){
     return;
   }
   tasks = [...parsed.tasks, ...tasks];
-  saveTasks();
+  localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+  if(_fbReady&&_db){
+    const batch=_db.batch();
+    parsed.tasks.forEach(t=>batch.set(_db.collection('tasks').doc(t.id),t));
+    batch.commit().catch(e=>console.warn('importBulk batch error',e));
+  }
   closeBulkModal();
   refreshOverdueBadge();
   showPanel(currentPanel);
