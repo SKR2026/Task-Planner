@@ -47,13 +47,14 @@
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
 
   /* ─── layout ─── */
-  #app { display: flex; min-height: 100vh; }
+  #app { display: flex; flex-direction: row; min-height: 100vh; align-items: flex-start; }
   #sidebar {
     width: 240px; min-height: 100vh; background: var(--surface);
     border-right: 1px solid var(--border); display: flex; flex-direction: column;
-    position: sticky; top: 0; height: 100vh; overflow-y: auto; flex-shrink: 0;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    flex-shrink: 0; flex-grow: 0; flex-basis: 240px;
   }
-  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
   #topbar {
     background: var(--surface); border-bottom: 1px solid var(--border);
     padding: 14px 28px; display: flex; align-items: center; justify-content: space-between;
@@ -259,7 +260,7 @@
 
   /* ─── responsive ─── */
   @media (max-width: 900px) {
-    #sidebar { width: 60px; }
+    #sidebar { width: 60px; min-width: 60px; flex-basis: 60px; }
     .nav-item span, .nav-section, .logo span, .sidebar-mode-label { display: none; }
     .logo { padding: 14px 10px; font-size: 0; }
     .logo img { height: 28px !important; }
