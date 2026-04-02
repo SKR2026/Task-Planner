@@ -456,6 +456,11 @@ let _unsubscribeTasks = null;
                     // Only notify admin if reply is NOT from Admin
                     if(r.author !== 'Admin'){
                       addNotification(newT.id, newT.title, r.author, r.text || '(attachment)');
+                      // Also send email notification to admin if EmailJS is configured
+                      const cfg = getEmailConfig();
+                      if(cfg.service && cfg.template && cfg.key){
+                        sendReplyNotificationEmail(newT, r);
+                      }
                     }
                   });
                 }
@@ -762,13 +767,16 @@ function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();de
 // ═══════════════════════════════════════════════════════════════════════
 let taskFilters={status:'All',priority:'All',search:'',overdue:false};
 
+let _selectedTasks = new Set();
+
 function renderTasks(){
   if(mode==='user'){showPanel('user');return;}
+  _selectedTasks.clear();
   const c=document.getElementById('content');
   c.innerHTML=`
   <div class="panel-title fade-in">All Tasks</div>
   <div class="panel-sub">${tasks.length} total tasks across all team members</div>
-  <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap" class="fade-in">
+  <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;align-items:center" class="fade-in">
     <input id="tf-search" class="form-input" style="max-width:280px;padding:9px 13px" placeholder="🔍  Search tasks or members…" value="${taskFilters.search}" oninput="taskFilters.search=this.value;renderTaskRows()"/>
     <select id="tf-status" class="form-select" style="max-width:160px" onchange="taskFilters.status=this.value;taskFilters.overdue=false;renderTaskRows()">
       <option>All</option>${STATUSES.map(s=>`<option${taskFilters.status===s?' selected':''}>${s}</option>`).join('')}
@@ -777,9 +785,69 @@ function renderTasks(){
       <option>All</option>${PRIOS.map(p=>`<option${taskFilters.priority===p?' selected':''}>${p}</option>`).join('')}
     </select>
     <button class="btn btn-ghost btn-sm" onclick="taskFilters={status:'All',priority:'All',search:'',overdue:false};renderTasks()">Reset</button>
+    <button class="btn btn-ghost btn-sm" onclick="selectAllTasks()" title="Select all visible tasks" style="margin-left:auto;">☑ Select All</button>
+  </div>
+  <!-- Bulk action bar — hidden until selection made -->
+  <div id="bulk-action-bar" style="display:none;align-items:center;gap:10px;padding:10px 14px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:var(--radius);margin-bottom:14px;">
+    <span id="bulk-count" style="font-weight:700;font-size:13px;color:var(--red);">0 selected</span>
+    <button class="btn btn-danger btn-sm" onclick="bulkDeleteTasks()">🗑 Delete Selected</button>
+    <button class="btn btn-ghost btn-sm" onclick="clearSelection()">✕ Clear Selection</button>
   </div>
   <div id="task-rows" class="fade-in"></div>`;
   renderTaskRows();
+}
+
+function toggleTaskSelect(id, checked){
+  if(checked) _selectedTasks.add(id);
+  else _selectedTasks.delete(id);
+  updateBulkBar();
+}
+
+function updateBulkBar(){
+  const bar = document.getElementById('bulk-action-bar');
+  const cnt = document.getElementById('bulk-count');
+  if(!bar||!cnt) return;
+  if(_selectedTasks.size > 0){
+    bar.style.display='flex';
+    cnt.textContent = _selectedTasks.size + ' task' + (_selectedTasks.size>1?'s':'') + ' selected';
+  } else {
+    bar.style.display='none';
+  }
+}
+
+function selectAllTasks(){
+  const checkboxes = document.querySelectorAll('.task-select-cb');
+  const allChecked = checkboxes.length > 0 && [...checkboxes].every(cb=>cb.checked);
+  checkboxes.forEach(cb=>{
+    cb.checked = !allChecked;
+    if(!allChecked) _selectedTasks.add(cb.dataset.id);
+    else _selectedTasks.delete(cb.dataset.id);
+  });
+  updateBulkBar();
+}
+
+function clearSelection(){
+  _selectedTasks.clear();
+  document.querySelectorAll('.task-select-cb').forEach(cb=>cb.checked=false);
+  updateBulkBar();
+}
+
+function bulkDeleteTasks(){
+  if(_selectedTasks.size===0) return;
+  const count = _selectedTasks.size;
+  if(!confirm(`Permanently delete ${count} task${count>1?'s':''}? This cannot be undone.`)) return;
+  const ids = [..._selectedTasks];
+  tasks = tasks.filter(t=>!ids.includes(t.id));
+  localStorage.setItem('tf_tasks', JSON.stringify(tasks));
+  if(_fbReady&&_db){
+    const batch=_db.batch();
+    ids.forEach(id=>batch.delete(_db.collection('tasks').doc(id)));
+    batch.commit().catch(e=>console.warn('bulk delete error',e));
+  }
+  _selectedTasks.clear();
+  toast(`🗑 ${count} task${count>1?'s':''} deleted`, 'var(--red)');
+  refreshOverdueBadge();
+  renderTasks();
 }
 
 function renderTaskRows(){
@@ -792,7 +860,10 @@ function renderTaskRows(){
   const el=document.getElementById('task-rows');
   if(!filtered.length){el.innerHTML='<div class="empty"><div class="empty-icon">🔍</div><div>No tasks match your filters</div></div>';return;}
   el.innerHTML=filtered.map(t=>`
-    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openDrawer('${t.id}')">
+    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]};${_selectedTasks.has(t.id)?'background:rgba(248,113,113,.06);border-color:rgba(248,113,113,.3);':''}" onclick="openDrawer('${t.id}')">
+      <div style="display:flex;align-items:center;padding:2px 4px 0 0;flex-shrink:0" onclick="event.stopPropagation()">
+        <input type="checkbox" class="task-select-cb" data-id="${t.id}" ${_selectedTasks.has(t.id)?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--red);"/>
+      </div>
       <div class="task-row-body">
         <div class="task-title">${t.title}</div>
         <div class="task-meta">
@@ -1043,6 +1114,7 @@ function renderSettings(){
         </div>
       </div>
 
+      <div class="form-group"><label class="form-label">Admin Notify Email <span style="font-size:10px;color:var(--text3)">(receives reply alerts)</span></label><input class="form-input" id="admin-notify-email" placeholder="admin@company.com" value="${localStorage.getItem('admin_notify_email')||''}" oninput="localStorage.setItem('admin_notify_email',this.value)"/></div>
       <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="ejs-service" placeholder="service_xxxxxxx" value="${localStorage.getItem('ejs_service')||''}"/></div>
       <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="ejs-template" placeholder="template_xxxxxxx" value="${localStorage.getItem('ejs_template')||''}"/></div>
       <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="ejs-key" placeholder="your_public_key" value="${localStorage.getItem('ejs_key')||''}"/></div>
@@ -2863,6 +2935,37 @@ function exportPDF(){
   w.document.close();
   document.getElementById('export-modal-overlay')?.remove();
   toast('✅ PDF report opened — print to save!');
+}
+
+
+// ── Reply notification email to admin ────────────────────────────────
+async function sendReplyNotificationEmail(task, reply){
+  const cfg = getEmailConfig();
+  if(!cfg.service||!cfg.template||!cfg.key) return;
+  const adminEmail = localStorage.getItem('admin_notify_email') || '';
+  if(!adminEmail) return;
+  emailjs.init(cfg.key);
+  const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
+  try{
+    await emailjs.send(cfg.service, cfg.template, {
+      to_email:      adminEmail,
+      to_name:       'Admin',
+      task_title:    task.title,
+      task_desc:     '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)'),
+      task_link:     taskLink,
+      due_date:      fmt(task.due),
+      priority:      task.priority,
+      status:        task.status,
+      reminder:      '',
+      reason:        'reply',
+      reason_label:  'New Reply on Task',
+      change_detail: reply.author + ' replied: ' + (reply.text||'').slice(0,120),
+      from_name:     'POLYPLASTICS Task Manager'
+    });
+    console.log('Reply notification email sent to admin');
+  }catch(e){
+    console.warn('Reply notification email failed', e);
+  }
 }
 
 </script>
