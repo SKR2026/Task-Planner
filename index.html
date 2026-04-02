@@ -301,8 +301,8 @@
     <div class="sidebar-bottom">
       <div style="font-size:11px;color:var(--text3);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.8px" class="sidebar-mode-label">View Mode</div>
       <div style="display:flex;gap:6px;margin-bottom:10px;">
-        <button class="btn btn-primary btn-sm" id="btn-admin-mode" onclick="setMode('admin')" style="flex:1;justify-content:center;">Admin</button>
-        <button class="btn btn-ghost btn-sm" id="btn-user-mode" onclick="setMode('user')" style="flex:1;justify-content:center;">User</button>
+        <button class="btn btn-primary btn-sm" id="btn-admin-mode" onclick="setMode('admin')" style="flex:1;justify-content:center;display:none;">Admin</button>
+        <button class="btn btn-ghost btn-sm" id="btn-user-mode" onclick="setMode('user')" style="flex:1;justify-content:center;display:none;">User</button>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="handleLogout()" style="width:100%;justify-content:center;color:var(--red);border-color:rgba(248,113,113,.3);">⎋ Logout</button>
     </div>
@@ -1155,13 +1155,15 @@ let adminAuthenticated = false; // will be set true only after password check or
 
 function showAdminLoginScreen(){
   adminAuthenticated = false;
-  // Hide sidebar nav and new-task button
+  // Hide sidebar nav items and action buttons — keep sidebar visible
   document.getElementById('admin-nav').style.display = 'none';
   document.getElementById('btn-new-task').style.display = 'none';
   document.getElementById('btn-bulk-upload').style.display = 'none';
-  // Hide mode buttons and logout in sidebar-bottom
+  document.getElementById('btn-admin-mode').style.display = 'none';
+  document.getElementById('btn-user-mode').style.display = 'none';
+  // Keep sidebar-bottom visible but hidden so sidebar keeps its width
   const sidebarBottom = document.querySelector('.sidebar-bottom');
-  if(sidebarBottom) sidebarBottom.style.display = 'none';
+  if(sidebarBottom) sidebarBottom.style.visibility = 'hidden';
   // Show login in content
   document.getElementById('topbar-title').textContent = 'Admin Login';
   document.getElementById('content').innerHTML = `
@@ -1191,8 +1193,10 @@ function adminLogin(){
     err.style.display='none';
     adminAuthenticated = true;
     document.getElementById('admin-nav').style.display = 'block';
+    document.getElementById('btn-admin-mode').style.display = '';
+    document.getElementById('btn-user-mode').style.display = '';
     const sidebarBottom = document.querySelector('.sidebar-bottom');
-    if(sidebarBottom) sidebarBottom.style.display = '';
+    if(sidebarBottom){ sidebarBottom.style.display = ''; sidebarBottom.style.visibility = ''; }
     toast('Welcome back, Admin! 👋');
     showPanel('dashboard');
   };
