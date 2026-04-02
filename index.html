@@ -441,7 +441,27 @@ let _unsubscribeTasks = null;
             SEED.forEach(t => batch.set(_db.collection('tasks').doc(t.id), t));
             batch.commit();
           } else if (!snap.empty) {
+            const prevTasks = tasks;
             tasks = snap.docs.map(d => d.data());
+
+            // Detect new replies from users (for admin bell notification)
+            if(mode === 'admin' && prevTasks.length > 0){
+              tasks.forEach(newT => {
+                const oldT = prevTasks.find(p => p.id === newT.id);
+                const newReplies = (newT.replies || []);
+                const oldReplies = (oldT ? (oldT.replies || []) : []);
+                if(newReplies.length > oldReplies.length){
+                  // New reply(ies) added
+                  newReplies.slice(oldReplies.length).forEach(r => {
+                    // Only notify admin if reply is NOT from Admin
+                    if(r.author !== 'Admin'){
+                      addNotification(newT.id, newT.title, r.author, r.text || '(attachment)');
+                    }
+                  });
+                }
+              });
+            }
+
             refreshOverdueBadge();
             if (currentPanel === 'dashboard') renderDashboard();
             else if (currentPanel === 'tasks') renderTasks();
@@ -1863,7 +1883,6 @@ function submitDrawerReply(){
   const reply={id:uid(),author:'Admin',text,time:new Date().toISOString(),attachments:pendingFiles.map(f=>({name:f.name,size:f.size}))};
   activeDrawerTask={...activeDrawerTask,replies:[...activeDrawerTask.replies,reply]};
   updateTask(activeDrawerTask);
-  addNotification(activeDrawerTask.id, activeDrawerTask.title, reply.author, reply.text||'(attachment)');
   pendingFiles=[];
   toast('Reply sent!');
   renderDrawerContent();
