@@ -31,6 +31,18 @@
     --radius:    12px;
     --radius-lg: 18px;
   }
+  /* ─── light theme ─── */
+  body.light {
+    --bg:        #f0f2f7;
+    --surface:   #ffffff;
+    --card:      #ffffff;
+    --card2:     #eef0f6;
+    --border:    #d8dce8;
+    --border2:   #c8ccd8;
+    --text:      #1a1e2e;
+    --text2:     #4a5068;
+    --text3:     #8890a8;
+  }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
@@ -320,6 +332,20 @@
         <span style="font-size:12px;color:var(--text3);" id="current-date"></span>
         <button class="btn btn-ghost" id="btn-bulk-upload" onclick="openBulkUploadModal()" style="display:none;">⬆ Bulk Upload</button>
         <button class="btn btn-primary" id="btn-new-task" onclick="openNewTaskModal()" style="display:none;">+ New Task</button>
+        <!-- ── notification bell ── -->
+        <div style="position:relative;" id="notif-wrapper">
+          <button class="btn-icon" onclick="toggleNotifPanel()" title="Reply notifications" style="font-size:18px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">🔔</button>
+          <span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:50%;width:17px;height:17px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;">0</span>
+          <div id="notif-panel" style="display:none;position:absolute;right:0;top:44px;width:340px;max-height:400px;overflow-y:auto;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);z-index:300;box-shadow:0 8px 32px rgba(0,0,0,.4);">
+            <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-weight:700;font-size:14px;">Reply Notifications</span>
+              <button class="btn btn-ghost btn-sm" onclick="clearNotifications()" style="font-size:11px;padding:4px 8px;">Clear all</button>
+            </div>
+            <div id="notif-list"></div>
+          </div>
+        </div>
+        <!-- ── theme toggle ── -->
+        <button class="btn-icon" onclick="toggleTheme()" id="btn-theme" title="Toggle light/dark" style="font-size:16px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">🌙</button>
         <div id="topbar-user-info" style="display:none;align-items:center;gap:8px;">
           <span style="font-size:12px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="topbar-user-email"></span>
           <button class="btn btn-ghost btn-sm" onclick="handleLogout()" style="color:var(--red);border-color:rgba(248,113,113,.3);padding:6px 10px;">⎋</button>
@@ -576,32 +602,32 @@ function renderDashboard(){
   <div class="panel-sub">Live overview of all tasks, team performance, and deadlines</div>
 
   <div class="stats-grid fade-in">
-    <div class="stat-card" style="--c:var(--accent)">
+    <div class="stat-card" style="--c:var(--accent);cursor:pointer;" onclick="goToTasksFiltered('All','All')" title="View all tasks">
       <div class="stat-icon">📋</div>
       <div class="stat-value">${total}</div>
       <div class="stat-label">Total Tasks</div>
     </div>
-    <div class="stat-card" style="--c:var(--purple)">
+    <div class="stat-card" style="--c:var(--purple);cursor:pointer;" onclick="goToTasksFiltered('In Progress','All')" title="View In Progress tasks">
       <div class="stat-icon">⚡</div>
       <div class="stat-value">${inprog}</div>
       <div class="stat-label">In Progress</div>
     </div>
-    <div class="stat-card" style="--c:var(--amber)">
+    <div class="stat-card" style="--c:var(--amber);cursor:pointer;" onclick="goToTasksFiltered('Review','All')" title="View In Review tasks">
       <div class="stat-icon">👁</div>
       <div class="stat-value">${review}</div>
       <div class="stat-label">In Review</div>
     </div>
-    <div class="stat-card" style="--c:var(--green)">
+    <div class="stat-card" style="--c:var(--green);cursor:pointer;" onclick="goToTasksFiltered('Done','All')" title="View completed tasks">
       <div class="stat-icon">✅</div>
       <div class="stat-value">${done}</div>
       <div class="stat-label">Completed</div>
     </div>
-    <div class="stat-card" style="--c:var(--red)">
+    <div class="stat-card" style="--c:var(--red);cursor:pointer;" onclick="goToTasksFiltered('overdue','All')" title="View overdue tasks">
       <div class="stat-icon">🚨</div>
       <div class="stat-value">${overdue}</div>
       <div class="stat-label">Overdue</div>
     </div>
-    <div class="stat-card" style="--c:var(--cyan)">
+    <div class="stat-card" style="--c:var(--cyan);cursor:pointer;" onclick="goToTasksFiltered('To Do','All')" title="View To Do tasks">
       <div class="stat-icon">📈</div>
       <div class="stat-value">${rate}%</div>
       <div class="stat-label">Completion Rate</div>
@@ -735,7 +761,7 @@ function renderTasks(){
 
 function renderTaskRows(){
   const filtered=tasks.filter(t=>{
-    const ss=taskFilters.status==='All'||t.status===taskFilters.status;
+    const ss=taskFilters.overdue ? isOverdue(t) : (taskFilters.status==='All'||t.status===taskFilters.status);
     const sp=taskFilters.priority==='All'||t.priority===taskFilters.priority;
     const sq=!taskFilters.search||t.title.toLowerCase().includes(taskFilters.search.toLowerCase())||t.assignee.toLowerCase().includes(taskFilters.search.toLowerCase());
     return ss&&sp&&sq;
@@ -1647,6 +1673,7 @@ function submitUserReply(){
   };
   userTask={...userTask,replies:[...userTask.replies,reply]};
   updateTask(userTask);
+  addNotification(userTask.id, userTask.title, reply.author, reply.text||'(attachment)');
   pendingFiles=[];
   toast('Reply submitted successfully!');
   renderUserTask(document.getElementById('content'));
@@ -1817,6 +1844,7 @@ function submitDrawerReply(){
   const reply={id:uid(),author:'Admin',text,time:new Date().toISOString(),attachments:pendingFiles.map(f=>({name:f.name,size:f.size}))};
   activeDrawerTask={...activeDrawerTask,replies:[...activeDrawerTask.replies,reply]};
   updateTask(activeDrawerTask);
+  addNotification(activeDrawerTask.id, activeDrawerTask.title, reply.author, reply.text||'(attachment)');
   pendingFiles=[];
   toast('Reply sent!');
   renderDrawerContent();
@@ -2548,6 +2576,119 @@ if(mode !== 'user'){
     renderUserDashboard(c);
   }
 }
+
+// ── Theme toggle ──────────────────────────────────────────────────────
+function toggleTheme(){
+  const isLight = document.body.classList.toggle('light');
+  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+  document.getElementById('btn-theme').textContent = isLight ? '☀️' : '🌙';
+}
+(function initTheme(){
+  const saved = localStorage.getItem('theme');
+  if(saved === 'light'){
+    document.body.classList.add('light');
+    const btn = document.getElementById('btn-theme');
+    if(btn) btn.textContent = '☀️';
+  }
+})();
+
+// ── Notification system ───────────────────────────────────────────────
+let _notifications = JSON.parse(localStorage.getItem('tf_notifs') || '[]');
+
+function saveNotifs(){ localStorage.setItem('tf_notifs', JSON.stringify(_notifications)); }
+
+function addNotification(taskId, taskTitle, replyAuthor, replyText){
+  const n = {
+    id: uid(),
+    taskId,
+    taskTitle,
+    replyAuthor,
+    replyText: replyText.slice(0,80)+(replyText.length>80?'…':''),
+    time: new Date().toISOString(),
+    read: false
+  };
+  _notifications.unshift(n);
+  if(_notifications.length > 50) _notifications = _notifications.slice(0,50);
+  saveNotifs();
+  refreshNotifBadge();
+}
+
+function refreshNotifBadge(){
+  const unread = _notifications.filter(n=>!n.read).length;
+  const badge = document.getElementById('notif-badge');
+  if(!badge) return;
+  if(unread > 0){
+    badge.textContent = unread > 9 ? '9+' : unread;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function toggleNotifPanel(){
+  const panel = document.getElementById('notif-panel');
+  const open = panel.style.display === 'block';
+  panel.style.display = open ? 'none' : 'block';
+  if(!open){
+    renderNotifList();
+    // mark all as read when panel opens
+    _notifications.forEach(n => n.read = true);
+    saveNotifs();
+    refreshNotifBadge();
+  }
+}
+
+function renderNotifList(){
+  const list = document.getElementById('notif-list');
+  if(!list) return;
+  if(!_notifications.length){
+    list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">No notifications yet</div>';
+    return;
+  }
+  list.innerHTML = _notifications.map(n => `
+    <div onclick="openDrawer('${n.taskId}');document.getElementById('notif-panel').style.display='none';"
+      style="padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:background .15s;"
+      onmouseover="this.style.background='var(--card)'" onmouseout="this.style.background=''"
+    >
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span style="font-size:11px;font-weight:700;color:var(--accent);">${esc(n.replyAuthor)}</span>
+        <span style="font-size:10px;color:var(--text3);">${new Date(n.time).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px;">${esc(n.taskTitle)}</div>
+      <div style="font-size:12px;color:var(--text2);">${esc(n.replyText)}</div>
+    </div>`).join('');
+}
+
+function clearNotifications(){
+  _notifications = [];
+  saveNotifs();
+  refreshNotifBadge();
+  renderNotifList();
+}
+
+// close notif panel on outside click
+document.addEventListener('click', function(e){
+  const wrapper = document.getElementById('notif-wrapper');
+  if(wrapper && !wrapper.contains(e.target)){
+    const panel = document.getElementById('notif-panel');
+    if(panel) panel.style.display = 'none';
+  }
+});
+
+// init badge on load
+refreshNotifBadge();
+
+// ── Dashboard stat cards → filtered task list ─────────────────────────
+function goToTasksFiltered(status, priority){
+  if(status === 'overdue'){
+    // special: show overdue
+    taskFilters = {status:'All', priority:'All', search:'', overdue:true};
+  } else {
+    taskFilters = {status: status, priority: priority || 'All', search:'', overdue:false};
+  }
+  showPanel('tasks');
+}
+
 </script>
 </body>
 </html>
