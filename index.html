@@ -1755,6 +1755,14 @@ function getEmailConfig(){
   };
 }
 
+// Wraps any promise with a timeout so EmailJS never hangs the UI
+function withTimeout(promise, ms=10000){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error('EmailJS timeout')),ms))
+  ]);
+}
+
 async function sendTaskEmail(task, reason='assigned', extra={}){
   const cfg=getEmailConfig();
   if(!cfg.service||!cfg.template||!cfg.key){
@@ -1762,21 +1770,20 @@ async function sendTaskEmail(task, reason='assigned', extra={}){
     return false;
   }
   const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-  // Human-readable subject line based on reason
   const reasonLabels={
-    assigned:   'Task Assigned to You',
-    updated:    'Task Updated',
-    date_change:'Due Date Changed',
+    assigned:       'Task Assigned to You',
+    updated:        'Task Updated',
+    date_change:    'Due Date Changed',
     priority_change:'Priority Changed',
-    status_change:'Status Changed',
-    reminder:   'Task Reminder',
-    test:       'Test Email'
+    status_change:  'Status Changed',
+    reminder:       'Task Reminder',
+    test:           'Test Email'
   };
   const changeDetail = extra.changeDetail || '';
   try{
     if(typeof emailjs === 'undefined') throw new Error('EmailJS library not loaded');
     emailjs.init(cfg.key);
-    await emailjs.send(cfg.service, cfg.template, {
+    await withTimeout(emailjs.send(cfg.service, cfg.template, {
       to_email:     task.assignee,
       to_name:      task.assignee.split('@')[0],
       task_title:   task.title,
@@ -1790,10 +1797,10 @@ async function sendTaskEmail(task, reason='assigned', extra={}){
       reason_label: reasonLabels[reason]||reason,
       change_detail:changeDetail,
       from_name:    'POLYPLASTICS Task Manager'
-    });
+    }));
     return true;
   }catch(e){
-    console.error('EmailJS error',e);
+    console.error('EmailJS error:', e.message);
     return false;
   }
 }
@@ -1840,7 +1847,7 @@ async function sendTestMail(){
     return;
   }
   const fakeTask={assignee:testEmail,title:'Test Task — POLYPLASTICS Task Manager',desc:'This is a test email from POLYPLASTICS Task Manager. If you received this, your email integration is working correctly!',token:'test123',due:today(),priority:'Medium',status:'In Progress',reminder:'daily'};
-  const ok=await sendTaskEmail(fakeTask,'test');
+  const ok=await sendTaskEmail(fakeTask,'test').catch(()=>false);
   if(btn){btn.disabled=false;btn.textContent='📨 Send Test Mail';}
   if(ok){
     toast('✅ Test email sent to '+testEmail+'!');
@@ -2833,7 +2840,8 @@ function saveTask(){
       if(newStatus!==t.status)     changes.push({reason:'status_change', detail:'Status → '+newStatus});
       if(changes.length===0 && (title!==t.title||document.getElementById('tm-desc')?.value!==t.desc))
         changes.push({reason:'updated', detail:'Task details updated'});
-      changes.forEach(({reason,detail})=>notifyAssignee(updated, reason, {changeDetail:detail}));
+      // Fire all notifications in background — do not await, prevents UI hang
+      changes.forEach(({reason,detail})=>{ notifyAssignee(updated, reason, {changeDetail:detail}).catch(e=>console.warn('notify error',e)); });
       if(changes.length===0) toast('Task updated (no changes to notify).');
 
     } else {
@@ -2855,28 +2863,30 @@ function saveTask(){
       const ntClean = Object.fromEntries(Object.entries(nt).filter(([,v])=>v!==undefined));
       if(_fbReady&&_db) _db.collection('tasks').doc(ntClean.id).set(ntClean).catch(e=>console.warn('addTask error',e));
 
-      // Close modal & refresh UI immediately — before async email
+      // Close modal & refresh UI FIRST — emails run in background after render
       closeTaskModal(); refreshOverdueBadge(); showPanel(currentPanel);
 
-      const cfg=getEmailConfig();
-      if(cfg.service&&cfg.template&&cfg.key){
-        // Send to assignee
-        sendTaskEmail(nt,'assigned').then(ok=>{
-          if(ok) toast('\u2705 Task created & email sent to '+assignee+'!');
-          else   toast('Task created! Could not send email — check EmailJS settings.','var(--amber)');
-        }).catch(e=>{
-          console.warn('sendTaskEmail error:',e);
-          toast('Task created! Email failed — check EmailJS settings.','var(--amber)');
-        });
-        // Always notify admin when ANY user (admin or plant owner) creates a task
-        sendAdminTaskCreationEmail(nt);
-      } else {
-        toast('\u2705 Task created for '+assignee+'!');
-        try{
-          const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
-          openMailtoFallback(nt,taskLink);
-        }catch(mailErr){ console.warn('mailto fallback failed:',mailErr); }
-      }
+      setTimeout(()=>{
+        const cfg=getEmailConfig();
+        if(cfg.service&&cfg.template&&cfg.key){
+          // Send to assignee (fire and forget — no await)
+          sendTaskEmail(nt,'assigned').then(ok=>{
+            if(ok) toast('\u2705 Task created & email sent to '+assignee+'!');
+            else   toast('Task created! Email failed — check EmailJS settings.','var(--amber)');
+          }).catch(e=>{
+            console.warn('sendTaskEmail error:',e);
+            toast('Task created! Email error — check EmailJS settings.','var(--amber)');
+          });
+          // Notify admin (fire and forget — no await, no hang)
+          sendAdminTaskCreationEmail(nt).catch(e=>console.warn('admin email error:',e));
+        } else {
+          toast('\u2705 Task created for '+assignee+'!');
+          try{
+            const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
+            openMailtoFallback(nt,taskLink);
+          }catch(mailErr){ console.warn('mailto fallback failed:',mailErr); }
+        }
+      }, 100); // small delay ensures UI is fully rendered before network calls
     }
   }catch(err){
     console.error('saveTask error:',err);
@@ -3751,27 +3761,17 @@ async function sendReplyNotificationEmail(task, reply){
   const cfg = getEmailConfig();
   if(!cfg.service||!cfg.template||!cfg.key) return;
   const adminEmail = localStorage.getItem('admin_notify_email') || '';
-  if(!adminEmail) return;
+  if(!adminEmail){ console.warn('Admin notify email not set'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
-  // Build a fake task-like object so sendTaskEmail can route to adminEmail
-  const adminTask = {
-    assignee:  adminEmail,
-    title:     task.title,
-    desc:      '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)'),
-    token:     task.token,
-    due:       task.due,
-    priority:  task.priority,
-    status:    task.status,
-    reminder:  ''
-  };
   try{
     if(typeof emailjs === 'undefined') throw new Error('EmailJS library not loaded');
     emailjs.init(cfg.key);
-    await emailjs.send(cfg.service, cfg.template, {
-      to_email:      adminEmail,        // must match your template's To field variable
+    await withTimeout(emailjs.send(cfg.service, cfg.template, {
+      to_email:      adminEmail,
+      email:         adminEmail,
       to_name:       'Admin',
       task_title:    task.title,
-      task_desc:     '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)'),
+      task_desc:     '\ud83d\udcac New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)'),
       task_link:     taskLink,
       due_date:      fmt(task.due),
       priority:      task.priority,
@@ -3780,31 +3780,30 @@ async function sendReplyNotificationEmail(task, reply){
       reason:        'reply',
       reason_label:  'New Reply on Task',
       change_detail: reply.author + ' replied: ' + (reply.text||'').slice(0,120),
-      from_name:     'POLYPLASTICS Task Manager',
-      // ⬇ Duplicate as "email" in case your template uses {{email}} instead of {{to_email}}
-      email:         adminEmail
-    });
+      from_name:     'POLYPLASTICS Task Manager'
+    }));
     console.log('Reply notification email sent to admin:', adminEmail);
   }catch(e){
-    console.warn('Reply notification email failed', e);
+    console.warn('Reply notification email failed:', e.message);
   }
 }
 
-// ── Admin notification on task creation (by plant owner) ─────────────
+// ── Admin notification on task creation (by plant owner or admin) ────
 async function sendAdminTaskCreationEmail(task){
   const cfg = getEmailConfig();
   if(!cfg.service||!cfg.template||!cfg.key) return;
   const adminEmail = localStorage.getItem('admin_notify_email') || '';
-  if(!adminEmail) return;
+  if(!adminEmail){ console.warn('Admin notify email not set — skipping admin creation email'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
     if(typeof emailjs === 'undefined') throw new Error('EmailJS library not loaded');
     emailjs.init(cfg.key);
-    await emailjs.send(cfg.service, cfg.template, {
-      to_email:      adminEmail,        // must match your template's To field variable
+    await withTimeout(emailjs.send(cfg.service, cfg.template, {
+      to_email:      adminEmail,
+      email:         adminEmail,
       to_name:       'Admin',
       task_title:    task.title,
-      task_desc:     '📋 New task created by plant owner and assigned to: ' + task.assignee + '\n\n' + (task.desc||'No description.'),
+      task_desc:     '\ud83d\udccb New task assigned to: ' + task.assignee + '\n\n' + (task.desc||'No description.'),
       task_link:     taskLink,
       due_date:      fmt(task.due),
       priority:      task.priority,
@@ -3812,14 +3811,12 @@ async function sendAdminTaskCreationEmail(task){
       reminder:      task.reminder||'',
       reason:        'task_created',
       reason_label:  'New Task Created',
-      change_detail: 'Plant owner created task: ' + task.title + ' → assigned to ' + task.assignee,
-      from_name:     'POLYPLASTICS Task Manager',
-      // ⬇ Duplicate as "email" in case your template uses {{email}} instead of {{to_email}}
-      email:         adminEmail
-    });
-    console.log('Admin task-creation notification sent to', adminEmail);
+      change_detail: 'Task created: ' + task.title + ' \u2192 assigned to ' + task.assignee,
+      from_name:     'POLYPLASTICS Task Manager'
+    }));
+    console.log('Admin task-creation notification sent to:', adminEmail);
   }catch(e){
-    console.warn('Admin task-creation email failed', e);
+    console.warn('Admin task-creation email failed:', e.message);
   }
 }
 
