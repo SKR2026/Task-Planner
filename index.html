@@ -2292,7 +2292,6 @@ function impersonatePlantOwner(plantId){
 }
 
 function exitImpersonation(){
-  if(!confirm('Exit plant owner view and return to super admin?')) return;
   plantOwnerAuthenticated = false;
   currentPlantSession = null;
   sessionStorage.removeItem('pg_impersonate_return');
@@ -2360,7 +2359,6 @@ function adminLogin(){
 // ── Logout ────────────────────────────────────────────────────────────
 function handleLogout(){
   if(mode==='user'){
-    if(!confirm('Log out?'))return;
     userEmail='';
     userTask=null;
     // Keep mode as 'user' — do NOT switch to admin after user logout
@@ -2383,7 +2381,6 @@ function handleLogout(){
       </div>`;
     return;
   } else if(plantOwnerAuthenticated){
-    if(!confirm('Log out of plant session?'))return;
     plantOwnerAuthenticated = false;
     currentPlantSession = null;
     sessionStorage.removeItem('pg_impersonate_return');
@@ -2397,7 +2394,6 @@ function handleLogout(){
     toast('Plant owner logged out');
   } else {
     // Admin logout — lock the dashboard and show login screen
-    if(!confirm('Log out of admin session?'))return;
     userEmail='';
     userTask=null;
     showAdminLoginScreen();
