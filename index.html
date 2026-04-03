@@ -1757,7 +1757,6 @@ async function sendTaskEmail(task, reason='assigned', extra={}){
     console.warn('EmailJS not configured');
     return false;
   }
-  emailjs.init(cfg.key);
   const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
   // Human-readable subject line based on reason
   const reasonLabels={
@@ -1771,6 +1770,8 @@ async function sendTaskEmail(task, reason='assigned', extra={}){
   };
   const changeDetail = extra.changeDetail || '';
   try{
+    if(typeof emailjs === 'undefined') throw new Error('EmailJS library not loaded');
+    emailjs.init(cfg.key);
     await emailjs.send(cfg.service, cfg.template, {
       to_email:     task.assignee,
       to_name:      task.assignee.split('@')[0],
@@ -2832,6 +2833,11 @@ function saveTask(){
           const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
           openMailtoFallback(nt,taskLink);
         }
+      }).catch(e=>{
+        console.warn('sendTaskEmail unexpected error:',e);
+        toast('Task created! Opening mail client…','var(--amber)');
+        const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
+        openMailtoFallback(nt,taskLink);
       });
     } else {
       // No EmailJS — automatically open mailto (pre-filled email) right away
@@ -3712,9 +3718,10 @@ async function sendReplyNotificationEmail(task, reply){
   if(!cfg.service||!cfg.template||!cfg.key) return;
   const adminEmail = localStorage.getItem('admin_notify_email') || '';
   if(!adminEmail) return;
-  emailjs.init(cfg.key);
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
+    if(typeof emailjs === 'undefined') throw new Error('EmailJS library not loaded');
+    emailjs.init(cfg.key);
     await emailjs.send(cfg.service, cfg.template, {
       to_email:      adminEmail,
       to_name:       'Admin',
