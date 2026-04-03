@@ -306,6 +306,8 @@
       <div class="nav-section">Management</div>
       <div class="nav-item" onclick="showPanel('reminders')"><span class="nav-icon">🔔</span><span>Reminders</span></div>
       <div class="nav-item" onclick="showPanel('team')"><span class="nav-icon">👥</span><span>Team</span></div>
+      <div class="nav-section">🏭 Plants</div>
+      <div id="plant-nav-items"><!-- rendered by renderPlantNav() --></div>
       <div class="nav-section">Settings</div>
       <div class="nav-item" onclick="showPanel('settings')"><span class="nav-icon">⚙️</span><span>Settings</span></div>
     </div>
@@ -426,6 +428,12 @@ let _unsubscribeTasks = null;
             if(s.testEmail) localStorage.setItem('ejs_test_email',s.testEmail);
           }
         }).catch(()=>{});
+        _db.collection('settings').doc('plantGroups').get().then(d=>{
+          if(d.exists&&d.data().plants){
+            localStorage.setItem('pg_plants',JSON.stringify(d.data().plants));
+            renderPlantNav();
+          }
+        }).catch(()=>{});
         // Subscribe to real-time task updates
         _unsubscribeTasks = _db.collection('tasks').onSnapshot(snap => {
           // Mark connected
@@ -468,6 +476,7 @@ let _unsubscribeTasks = null;
             }
 
             refreshOverdueBadge();
+            renderPlantNav();
             if (currentPanel === 'dashboard') renderDashboard();
             else if (currentPanel === 'tasks') renderTasks();
             else if (currentPanel === 'kanban') renderKanban();
@@ -494,6 +503,8 @@ let _unsubscribeTasks = null;
 
 // ── state ─────────────────────────────────────────────────────────────
 let tasks = JSON.parse(localStorage.getItem('tf_tasks') || 'null') || SEED;
+// plant nav rendered after DOM is ready
+document.addEventListener('DOMContentLoaded',()=>{ setTimeout(renderPlantNav,100); });
 let mode = 'admin'; // 'admin' | 'user'
 let currentPanel = 'dashboard';
 let activeDrawerTask = null;
@@ -604,10 +615,10 @@ function showPanel(name){
   document.getElementById('btn-new-task').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
   document.getElementById('btn-bulk-upload').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
   document.getElementById('btn-export').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
-  const panels={dashboard:renderDashboard,tasks:renderTasks,mytasks:renderMyTasks,kanban:renderKanban,reminders:renderReminders,team:renderTeam,settings:renderSettings,user:renderUser};
+  const panels={dashboard:renderDashboard,tasks:renderTasks,mytasks:renderMyTasks,kanban:renderKanban,reminders:renderReminders,team:renderTeam,settings:renderSettings,user:renderUser,plant:renderPlantPanel};
   const fn=panels[name];
   if(fn){ document.getElementById('content').innerHTML=''; fn(); }
-  const titles={dashboard:'Dashboard',tasks:'All Tasks',mytasks:'My Tasks',kanban:'Kanban Board',reminders:'Reminders',team:'Team',settings:'Settings',user:'My Tasks'};
+  const titles={dashboard:'Dashboard',tasks:'All Tasks',mytasks:'My Tasks',kanban:'Kanban Board',reminders:'Reminders',team:'Team',settings:'Settings',user:'My Tasks',plant:'Plant Overview'};
   document.getElementById('topbar-title').textContent=titles[name]||name;
   refreshOverdueBadge();
 }
@@ -691,6 +702,14 @@ function renderDashboard(){
       <div class="section-head" style="margin-bottom:14px">Upcoming Deadlines</div>
       <div id="upcoming-list"></div>
     </div>
+  </div>
+
+  <div class="card fade-in" style="margin-top:0" id="dash-plant-section">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="section-head" style="margin-bottom:0">🏭 Plant-wise Performance</div>
+      <span style="font-size:11px;color:var(--text3)">Manage plants in Settings → Plant Groups</span>
+    </div>
+    <div id="dash-plant-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px"></div>
   </div>`;
 
   // charts
@@ -873,7 +892,159 @@ function renderDashboard(){
         <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</div><div style="font-size:11px;color:var(--text3)">${t.assignee}</div></div>
         <div style="font-size:11px;color:${isOverdue(t)?'var(--red)':'var(--text3)'};white-space:nowrap">${fmt(t.due)}</div>
       </div>`).join(''):'<div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">All tasks done! 🎉</div>';
+    // ── Plant-wise performance ──────────────────────────────────────
+    renderDashPlants();
   },50);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PLANT GROUPS — data helpers
+// ═══════════════════════════════════════════════════════════════════════
+function getPlantGroups(){
+  try{ return JSON.parse(localStorage.getItem('pg_plants')||'[]'); }catch(e){return [];}
+}
+function savePlantGroups(arr){
+  localStorage.setItem('pg_plants', JSON.stringify(arr));
+  if(_fbReady&&_db) _db.collection('settings').doc('plantGroups').set({plants:arr}).catch(e=>console.warn('plant save err',e));
+}
+
+// ── Sidebar plant nav ─────────────────────────────────────────────────
+function renderPlantNav(){
+  const el=document.getElementById('plant-nav-items');
+  if(!el) return;
+  const groups=getPlantGroups();
+  if(!groups.length){
+    el.innerHTML=`<div style="padding:4px 16px 8px;font-size:11px;color:var(--text3)">No plants yet.<br><span style="cursor:pointer;color:var(--accent)" onclick="showPanel('settings');setTimeout(()=>{const s=document.getElementById('plant-settings-section');if(s)s.scrollIntoView({behavior:'smooth'});},200)">Add in Settings →</span></div>`;
+    return;
+  }
+  el.innerHTML=groups.map(p=>`
+    <div class="nav-item" onclick="showPlantPanel('${esc(p.id)}')" id="plant-nav-${p.id}">
+      <span class="nav-icon">🏭</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span>
+    </div>`).join('');
+}
+
+// ── Show a single plant panel ─────────────────────────────────────────
+let _activePlantId = null;
+function showPlantPanel(id){
+  _activePlantId=id;
+  showPanel('plant');
+}
+
+function renderPlantPanel(){
+  if(mode==='user'){showPanel('user');return;}
+  const groups=getPlantGroups();
+  if(!_activePlantId&&groups.length) _activePlantId=groups[0]?.id;
+  const plant=groups.find(p=>p.id===_activePlantId);
+  const c=document.getElementById('content');
+  if(!plant){
+    c.innerHTML=`<div class="panel-title fade-in">Plant Overview</div><div class="panel-sub">No plant selected. <a onclick="showPanel('settings')" style="color:var(--accent);cursor:pointer">Add plants in Settings →</a></div>`;
+    return;
+  }
+  // tasks for this plant
+  const owners=(plant.owners||[]).map(o=>o.toLowerCase());
+  const plantTasks=tasks.filter(t=>owners.includes((t.assignee||'').toLowerCase())||(t.plant&&t.plant===plant.id));
+  const total=plantTasks.length;
+  const done=plantTasks.filter(t=>t.status==='Done').length;
+  const inprog=plantTasks.filter(t=>t.status==='In Progress').length;
+  const overdue=plantTasks.filter(isOverdue).length;
+  const rate=total?Math.round(done/total*100):0;
+
+  c.innerHTML=`
+  <div class="panel-title fade-in">🏭 ${esc(plant.name)}</div>
+  <div class="panel-sub">Owner: <strong style="color:var(--accent)">${esc((plant.owners||[]).join(', ')||'—')}</strong> &nbsp;·&nbsp; ${total} tasks</div>
+
+  <div class="stats-grid fade-in">
+    <div class="stat-card" style="--c:var(--accent)"><div class="stat-icon">📋</div><div class="stat-value">${total}</div><div class="stat-label">Total Tasks</div></div>
+    <div class="stat-card" style="--c:var(--purple)"><div class="stat-icon">⚡</div><div class="stat-value">${inprog}</div><div class="stat-label">In Progress</div></div>
+    <div class="stat-card" style="--c:var(--green)"><div class="stat-icon">✅</div><div class="stat-value">${done}</div><div class="stat-label">Completed</div></div>
+    <div class="stat-card" style="--c:var(--red)"><div class="stat-icon">🚨</div><div class="stat-value">${overdue}</div><div class="stat-label">Overdue</div></div>
+    <div class="stat-card" style="--c:var(--cyan)"><div class="stat-icon">📈</div><div class="stat-value">${rate}%</div><div class="stat-label">Completion Rate</div></div>
+  </div>
+
+  <div class="charts-grid fade-in" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:22px">
+    <div class="card"><div class="section-head" style="margin-bottom:12px">By Status</div><div class="chart-wrap"><canvas id="pch-status"></canvas></div></div>
+    <div class="card"><div class="section-head" style="margin-bottom:12px">By Priority</div><div class="chart-wrap"><canvas id="pch-prio"></canvas></div></div>
+    <div class="card"><div class="section-head" style="margin-bottom:12px">On-Time Compliance</div>
+      <div style="display:flex;align-items:center;justify-content:center;height:180px;flex-direction:column">
+        <div style="font-size:48px;font-weight:800;color:${rate>=80?'var(--green)':rate>=50?'var(--amber)':'var(--red)'}">${rate}%</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:6px">${done} of ${total} tasks completed</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card fade-in">
+    <div class="section-head" style="margin-bottom:14px">Tasks for this Plant</div>
+    <div id="plant-task-rows"></div>
+  </div>`;
+
+  setTimeout(()=>{
+    // status chart
+    destroyChart('pch-status');
+    chartInstances['pch-status']=new Chart(document.getElementById('pch-status'),{
+      type:'doughnut',
+      data:{labels:STATUSES,datasets:[{data:STATUSES.map(s=>plantTasks.filter(t=>t.status===s).length),backgroundColor:['rgba(156,163,176,.7)','rgba(91,141,238,.7)','rgba(167,139,250,.7)','rgba(52,211,153,.7)'],borderWidth:0,hoverOffset:4}]},
+      options:{plugins:{legend:{position:'right',labels:{color:'#9aa5c0',boxWidth:10,font:{size:11}}}},cutout:'65%',maintainAspectRatio:false}
+    });
+    // prio chart
+    destroyChart('pch-prio');
+    chartInstances['pch-prio']=new Chart(document.getElementById('pch-prio'),{
+      type:'bar',
+      data:{labels:PRIOS,datasets:[{data:PRIOS.map(p=>plantTasks.filter(t=>t.priority===p).length),backgroundColor:['rgba(248,113,113,.7)','rgba(251,191,36,.7)','rgba(52,211,153,.7)'],borderWidth:0}]},
+      options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}
+    });
+    // task list
+    const tRows=document.getElementById('plant-task-rows');
+    if(!plantTasks.length){tRows.innerHTML='<div class="empty"><div class="empty-icon">🌿</div><div>No tasks found for this plant</div></div>';return;}
+    tRows.innerHTML=plantTasks.map(t=>`
+      <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openDrawer('${t.id}')">
+        <div class="task-row-body">
+          <div class="task-title">${esc(t.title)}</div>
+          <div class="task-meta">
+            <span>👤 ${esc(t.assignee)}</span>
+            <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
+          </div>
+        </div>
+        <div class="task-actions" onclick="event.stopPropagation()">
+          <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
+          <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
+          ${isOverdue(t)?'<span class="badge badge-overdue">Overdue</span>':''}
+        </div>
+      </div>`).join('');
+  },50);
+}
+
+// ── Dashboard plant performance grid ─────────────────────────────────
+function renderDashPlants(){
+  const sec=document.getElementById('dash-plant-section');
+  const grid=document.getElementById('dash-plant-grid');
+  if(!sec||!grid) return;
+  const groups=getPlantGroups();
+  if(!groups.length){
+    sec.style.display='none'; return;
+  }
+  sec.style.display='';
+  const aColors=['#5b8dee','#a78bfa','#34d399','#fbbf24','#f87171','#22d3ee','#f97316','#10b981','#ec4899','#8b5cf6'];
+  grid.innerHTML=groups.map((p,idx)=>{
+    const owners=(p.owners||[]).map(o=>o.toLowerCase());
+    const pt=tasks.filter(t=>owners.includes((t.assignee||'').toLowerCase())||(t.plant&&t.plant===p.id));
+    const done=pt.filter(t=>t.status==='Done').length;
+    const overdue=pt.filter(isOverdue).length;
+    const rate=pt.length?Math.round(done/pt.length*100):0;
+    const col=aColors[idx%aColors.length];
+    const barColor=rate>=80?'var(--green)':rate>=50?'var(--amber)':'var(--red)';
+    return `<div class="card" style="cursor:pointer;border-left:3px solid ${col};padding:16px" onclick="showPlantPanel('${p.id}')">
+      <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((p.owners||[]).join(', ')||'No owner')}</div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px">
+        <span style="color:var(--text2)">${pt.length} tasks</span>
+        <span style="color:var(--green)">${done} done</span>
+        ${overdue?`<span style="color:var(--red)">${overdue} overdue</span>`:''}
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${rate}%;background:${barColor}"></div></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;text-align:right">${rate}% complete</div>
+    </div>`;
+  }).join('');
 }
 
 function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id];}}
@@ -1246,6 +1417,30 @@ function renderSettings(){
       </div>
     </div>
 
+    <div class="card" id="plant-settings-section">
+      <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">🏭 Plant Groups</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:18px">Create plant groups and assign owners. Each owner will only see their plant's tasks when they log in.</div>
+
+      <!-- Add new plant form -->
+      <div style="background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:18px">
+        <div style="font-weight:600;font-size:13px;color:var(--text);margin-bottom:12px">➕ Add New Plant</div>
+        <div class="form-row" style="margin-bottom:12px">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Plant Name</label>
+            <input class="form-input" id="pg-name" placeholder="e.g. Plant A — Mumbai"/>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Owner Email(s) <span style="color:var(--text3);font-weight:400;text-transform:none">(comma-separated)</span></label>
+            <input class="form-input" id="pg-owners" placeholder="owner1@company.com, owner2@company.com"/>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="addPlantGroup()">➕ Add Plant</button>
+      </div>
+
+      <!-- Plant list -->
+      <div id="pg-list"></div>
+    </div>
+
     <div class="card">
       <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:16px">🗄 Data Management</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -1277,6 +1472,115 @@ function renderSettings(){
       </div>
     </div>
   </div>`;
+  // render plant list after innerHTML is set
+  setTimeout(()=>renderPgList(),0);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PLANT GROUP MANAGEMENT (Settings)
+// ═══════════════════════════════════════════════════════════════════════
+function renderPgList(){
+  const el=document.getElementById('pg-list');
+  if(!el) return;
+  const groups=getPlantGroups();
+  if(!groups.length){
+    el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px">No plants added yet. Use the form above to create your first plant group.</div>';
+    return;
+  }
+  el.innerHTML=groups.map((p,idx)=>{
+    const aColors=['#5b8dee','#a78bfa','#34d399','#fbbf24','#f87171','#22d3ee','#f97316','#10b981','#ec4899','#8b5cf6'];
+    const col=aColors[idx%aColors.length];
+    const owners=(p.owners||[]).map(o=>o.toLowerCase());
+    const pt=tasks.filter(t=>owners.includes((t.assignee||'').toLowerCase())||(t.plant&&t.plant===p.id));
+    const done=pt.filter(t=>t.status==='Done').length;
+    const overdue=pt.filter(isOverdue).length;
+    return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-left:4px solid ${col};border-radius:var(--radius);margin-bottom:8px" id="pg-row-${p.id}">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+          <span id="pg-name-display-${p.id}" style="font-weight:700;font-size:14px;color:var(--text)">${esc(p.name)}</span>
+          <span style="font-size:10px;color:var(--text3);background:var(--card);border:1px solid var(--border);border-radius:4px;padding:1px 6px">${pt.length} tasks · ${done} done${overdue?` · <span style="color:var(--red)">${overdue} overdue</span>`:''}</span>
+        </div>
+        <div id="pg-owners-display-${p.id}" style="font-size:12px;color:var(--text3)">👤 ${esc((p.owners||[]).join(', ')||'No owner assigned')}</div>
+        <!-- inline edit form (hidden by default) -->
+        <div id="pg-edit-form-${p.id}" style="display:none;margin-top:10px">
+          <div class="form-row" style="margin-bottom:8px">
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Plant Name</label>
+              <input class="form-input" id="pg-edit-name-${p.id}" value="${esc(p.name)}"/>
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Owner Email(s)</label>
+              <input class="form-input" id="pg-edit-owners-${p.id}" value="${esc((p.owners||[]).join(', '))}"/>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-success btn-sm" onclick="savePlantEdit('${p.id}')">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="cancelPlantEdit('${p.id}')">Cancel</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="btn btn-ghost btn-sm" onclick="showPlantPanel('${p.id}')" title="View plant dashboard">📊 View</button>
+        <button class="btn btn-ghost btn-sm" onclick="startPlantEdit('${p.id}')" title="Edit plant">✏ Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePlantGroup('${p.id}')" title="Delete plant">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function addPlantGroup(){
+  const name=(document.getElementById('pg-name')?.value||'').trim();
+  const ownersRaw=(document.getElementById('pg-owners')?.value||'').trim();
+  if(!name){ toast('Plant name is required','var(--red)'); return; }
+  const owners=ownersRaw?ownersRaw.split(',').map(o=>o.trim()).filter(Boolean):[];
+  const groups=getPlantGroups();
+  const newPlant={id:uid(),name,owners,created:today()};
+  groups.push(newPlant);
+  savePlantGroups(groups);
+  document.getElementById('pg-name').value='';
+  document.getElementById('pg-owners').value='';
+  renderPgList();
+  renderPlantNav();
+  renderDashPlants();
+  toast('🏭 Plant "'+name+'" added!');
+}
+
+function startPlantEdit(id){
+  document.getElementById('pg-edit-form-'+id).style.display='block';
+  document.getElementById('pg-name-display-'+id).style.display='none';
+  document.getElementById('pg-owners-display-'+id).style.display='none';
+}
+
+function cancelPlantEdit(id){
+  document.getElementById('pg-edit-form-'+id).style.display='none';
+  document.getElementById('pg-name-display-'+id).style.display='';
+  document.getElementById('pg-owners-display-'+id).style.display='';
+}
+
+function savePlantEdit(id){
+  const name=(document.getElementById('pg-edit-name-'+id)?.value||'').trim();
+  const ownersRaw=(document.getElementById('pg-edit-owners-'+id)?.value||'').trim();
+  if(!name){ toast('Plant name is required','var(--red)'); return; }
+  const owners=ownersRaw?ownersRaw.split(',').map(o=>o.trim()).filter(Boolean):[];
+  const groups=getPlantGroups().map(p=>p.id===id?{...p,name,owners}:p);
+  savePlantGroups(groups);
+  renderPgList();
+  renderPlantNav();
+  renderDashPlants();
+  toast('✅ Plant updated!');
+}
+
+function deletePlantGroup(id){
+  const groups=getPlantGroups();
+  const plant=groups.find(p=>p.id===id);
+  if(!confirm('Delete plant "'+( plant?.name||id)+'"? This will not delete the tasks.')) return;
+  savePlantGroups(groups.filter(p=>p.id!==id));
+  renderPgList();
+  renderPlantNav();
+  if(_activePlantId===id){ _activePlantId=null; }
+  renderDashPlants();
+  toast('🗑 Plant deleted','var(--red)');
 }
 
 function saveEmailSettings(){
