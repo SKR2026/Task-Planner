@@ -2741,60 +2741,69 @@ function openNewTaskModal(){editTaskId=null;openTaskModal();}
 function openEditModal(id){editTaskId=id;openTaskModal();}
 
 function openTaskModal(){
-  const t=editTaskId?getTask(editTaskId):null;
-  // If plant owner session: pre-fill assignee from their owners list
-  const plantOwners = plantOwnerAuthenticated && currentPlantSession
-    ? (currentPlantSession.owners||[])
-    : [];
-  const assigneeField = plantOwnerAuthenticated && currentPlantSession
-    ? `<div class="form-group"><label class="form-label">Assign To (Email) *</label>
-        <input id="tm-assignee" class="form-input" type="email" value="${esc(t?t.assignee:'')}" placeholder="anyone@company.com" list="tm-assignee-suggestions"/>
-        <datalist id="tm-assignee-suggestions">
-          ${plantOwners.map(o=>`<option value="${esc(o)}">`).join('')}
-        </datalist>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Type any email — plant owner emails are suggested above</div>
-       </div>`
-    : `<div class="form-group"><label class="form-label">Assign To (Email) *</label><input id="tm-assignee" class="form-input" type="email" value="${esc(t?t.assignee:'')}" placeholder="user@company.com"/></div>`;
-  const html=`
-  <div class="modal-overlay" id="task-modal-overlay" onclick="if(event.target===this)closeTaskModal()">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">${t?'Edit Task':'Create & Assign New Task'}</div>
-      <button class="modal-close" onclick="closeTaskModal()">✕</button>
-    </div>
-    <div class="form-group"><label class="form-label">Task Title *</label><input id="tm-title" class="form-input" value="${esc(t?t.title:'')}" placeholder="e.g. Fix login bug"/></div>
-    <div class="form-group"><label class="form-label">Description</label><textarea id="tm-desc" class="form-textarea">${esc(t?t.desc:'')}</textarea></div>
-    ${assigneeField}
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Priority</label>
-        <select id="tm-priority" class="form-select">${PRIOS.map(p=>`<option${t&&t.priority===p?' selected':''}>${p}</option>`).join('')}</select></div>
-      <div class="form-group"><label class="form-label">Status</label>
-        <select id="tm-status" class="form-select">${STATUSES.map(s=>`<option${t&&t.status===s?' selected':''}>${s}</option>`).join('')}</select></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Due Date *</label><input id="tm-due" class="form-input" type="date" value="${t?t.due:tomorrow()}"/></div>
-      <div class="form-group"><label class="form-label">Reminder Frequency</label>
-        <select id="tm-reminder" class="form-select">
-          <option value="none"${t&&t.reminder==='none'?' selected':''}>No Reminder</option>
-          <option value="daily"${t&&t.reminder==='daily'?' selected':''}>Daily</option>
-          <option value="weekly"${t&&t.reminder==='weekly'?' selected':''}>Weekly</option>
-          <option value="3days"${t&&t.reminder==='3days'?' selected':''}>Every 3 Days</option>
-          <option value="on_due"${t&&t.reminder==='on_due'?' selected':''}>On Due Date Only</option>
-        </select>
+  try{
+    // Dedup guard — remove any stale modal before opening a fresh one
+    document.getElementById('task-modal-overlay')?.remove();
+    const t=editTaskId?getTask(editTaskId):null;
+    // If plant owner session: pre-fill assignee from their owners list
+    const plantOwners = plantOwnerAuthenticated && currentPlantSession
+      ? (currentPlantSession.owners||[])
+      : [];
+    const assigneeField = plantOwnerAuthenticated && currentPlantSession
+      ? `<div class="form-group"><label class="form-label">Assign To (Email) *</label>
+          <input id="tm-assignee" class="form-input" type="email" value="${esc(t?t.assignee:'')}" placeholder="anyone@company.com" list="tm-assignee-suggestions"/>
+          <datalist id="tm-assignee-suggestions">
+            ${plantOwners.map(o=>`<option value="${esc(o)}">`).join('')}
+          </datalist>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">Type any email — plant owner emails are suggested above</div>
+         </div>`
+      : `<div class="form-group"><label class="form-label">Assign To (Email) *</label><input id="tm-assignee" class="form-input" type="email" value="${esc(t?t.assignee:'')}" placeholder="user@company.com"/></div>`;
+    const html=`
+    <div class="modal-overlay" id="task-modal-overlay" onclick="if(event.target===this)closeTaskModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">${t?'Edit Task':'Create &amp; Assign New Task'}</div>
+        <button class="modal-close" onclick="closeTaskModal()">&#x2715;</button>
       </div>
-    </div>
-    <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input id="tm-tags" class="form-input" value="${esc(t?(t.tags||[]).join(', '):'')}" placeholder="design, frontend, urgent"/></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeTaskModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveTask()">${t?'Update Task':'Create & Assign Task'}</button>
-    </div>
-  </div></div>`;
-  document.body.insertAdjacentHTML('beforeend',html);
+      <div class="form-group"><label class="form-label">Task Title *</label><input id="tm-title" class="form-input" value="${esc(t?t.title:'')}" placeholder="e.g. Fix login bug"/></div>
+      <div class="form-group"><label class="form-label">Description</label><textarea id="tm-desc" class="form-textarea">${esc(t?t.desc:'')}</textarea></div>
+      ${assigneeField}
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Priority</label>
+          <select id="tm-priority" class="form-select">${PRIOS.map(p=>`<option${t&&t.priority===p?' selected':''}>${p}</option>`).join('')}</select></div>
+        <div class="form-group"><label class="form-label">Status</label>
+          <select id="tm-status" class="form-select">${STATUSES.map(s=>`<option${t&&t.status===s?' selected':''}>${s}</option>`).join('')}</select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Due Date *</label><input id="tm-due" class="form-input" type="date" value="${t?t.due:tomorrow()}"/></div>
+        <div class="form-group"><label class="form-label">Reminder Frequency</label>
+          <select id="tm-reminder" class="form-select">
+            <option value="none"${t&&t.reminder==='none'?' selected':''}>No Reminder</option>
+            <option value="daily"${t&&t.reminder==='daily'?' selected':''}>Daily</option>
+            <option value="weekly"${t&&t.reminder==='weekly'?' selected':''}>Weekly</option>
+            <option value="3days"${t&&t.reminder==='3days'?' selected':''}>Every 3 Days</option>
+            <option value="on_due"${t&&t.reminder==='on_due'?' selected':''}>On Due Date Only</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input id="tm-tags" class="form-input" value="${esc(t?(t.tags||[]).join(', '):'')}" placeholder="design, frontend, urgent"/></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeTaskModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTask()">${t?'Update Task':'Create &amp; Assign Task'}</button>
+      </div>
+    </div></div>`;
+    document.body.insertAdjacentHTML('beforeend',html);
+    setTimeout(()=>document.getElementById('tm-title')?.focus(),50);
+  }catch(err){
+    console.error('openTaskModal error:',err);
+    toast('Could not open task form: '+err.message,'var(--red)');
+  }
 }
 
 function closeTaskModal(){ document.getElementById('task-modal-overlay')?.remove(); }
 
 function saveTask(){
+  try{
   const title=document.getElementById('tm-title').value.trim();
   const assignee=document.getElementById('tm-assignee').value.trim();
   const due=document.getElementById('tm-due').value;
@@ -2848,6 +2857,10 @@ function saveTask(){
   }
   closeTaskModal(); refreshOverdueBadge();
   showPanel(currentPanel);
+  }catch(err){
+    console.error('saveTask error:',err);
+    toast('Error saving task: '+err.message,'var(--red)');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
