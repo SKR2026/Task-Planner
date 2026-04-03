@@ -2140,6 +2140,9 @@ function showAdminLoginScreen(){
           onkeydown="if(event.key==='Enter')adminLogin()"/>
       </div>
       <div id="admin-login-error" style="color:var(--red);font-size:13px;margin-bottom:10px;display:none">❌ Incorrect password. Try again.</div>
+      <div id="admin-login-hint" style="color:var(--text3);font-size:12px;margin-bottom:12px;padding:8px 12px;background:rgba(91,141,238,.07);border:1px solid rgba(91,141,238,.15);border-radius:8px;">
+        💡 Default password: <code style="color:var(--accent);font-family:monospace;">admin123</code> — change it in Settings after login.
+      </div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:10px" onclick="adminLogin()">🔓 Super Admin Login</button>
       <div style="text-align:center;font-size:12px;color:var(--text3);margin:8px 0">— or —</div>
       <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="showPlantOwnerLoginScreen()">🏭 Plant Owner Login</button>
@@ -2334,22 +2337,20 @@ function adminLogin(){
     toast('Welcome back, Admin! 👋');
     showPanel('dashboard');
   };
-  // Try Firestore password first, fall back to localStorage.
-  // If no password has ever been configured, deny access (no default fallback).
+  // Try Firestore password first, fall back to localStorage, then default.
+  const DEFAULT_ADMIN_PASSWORD = 'admin123'; // default if never configured
   if(_fbReady&&_db){
     _db.collection('settings').doc('admin').get().then(d=>{
-      const stored = (d.exists&&d.data().password) ? d.data().password : localStorage.getItem('admin_password');
-      if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
-      localStorage.setItem('admin_password',stored);
+      const stored = (d.exists&&d.data().password) ? d.data().password
+                   : (localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD);
+      localStorage.setItem('admin_password', stored);
       doLogin(stored);
     }).catch(()=>{
-      const stored = localStorage.getItem('admin_password');
-      if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+      const stored = localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD;
       doLogin(stored);
     });
   } else {
-    const stored = localStorage.getItem('admin_password');
-    if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+    const stored = localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD;
     doLogin(stored);
   }
 }
