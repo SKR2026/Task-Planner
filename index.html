@@ -433,10 +433,11 @@ let _unsubscribeTasks = null;
         _db.collection('settings').doc('emailjs').get().then(d=>{
           if(d.exists){
             const s=d.data();
-            if(s.service)   localStorage.setItem('ejs_service',s.service);
-            if(s.template)  localStorage.setItem('ejs_template',s.template);
-            if(s.key)       localStorage.setItem('ejs_key',s.key);
-            if(s.testEmail) localStorage.setItem('ejs_test_email',s.testEmail);
+            if(s.service)          localStorage.setItem('ejs_service',s.service);
+            if(s.template)         localStorage.setItem('ejs_template',s.template);
+            if(s.key)              localStorage.setItem('ejs_key',s.key);
+            if(s.testEmail)        localStorage.setItem('ejs_test_email',s.testEmail);
+            if(s.adminNotifyEmail) localStorage.setItem('admin_notify_email',s.adminNotifyEmail);
           }
         }).catch(()=>{});
         _db.collection('settings').doc('plantGroups').get().then(d=>{
@@ -475,9 +476,9 @@ let _unsubscribeTasks = null;
                     // Only notify admin if reply is NOT from Admin
                     if(r.author !== 'Admin'){
                       addNotification(newT.id, newT.title, r.author, r.text || '(attachment)');
-                      // Also send email notification to admin if EmailJS is configured
+                      // Also send email notification to admin if EmailJS is configured (only for real admin, not plant owner)
                       const cfg = getEmailConfig();
-                      if(cfg.service && cfg.template && cfg.key){
+                      if(adminAuthenticated && cfg.service && cfg.template && cfg.key){
                         sendReplyNotificationEmail(newT, r);
                       }
                     }
@@ -1499,7 +1500,7 @@ function renderSettings(){
         </div>
       </div>
 
-      <div class="form-group"><label class="form-label">Admin Notify Email <span style="font-size:10px;color:var(--text3)">(receives reply alerts)</span></label><input class="form-input" id="admin-notify-email" placeholder="admin@company.com" value="${localStorage.getItem('admin_notify_email')||''}" oninput="localStorage.setItem('admin_notify_email',this.value)"/></div>
+      <div class="form-group"><label class="form-label">Admin Notify Email <span style="font-size:10px;color:var(--text3)">(receives task creation &amp; reply alerts)</span></label><input class="form-input" id="admin-notify-email" placeholder="admin@company.com" value="${localStorage.getItem('admin_notify_email')||''}" oninput="localStorage.setItem('admin_notify_email',this.value)"/></div>
       <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="ejs-service" placeholder="service_xxxxxxx" value="${localStorage.getItem('ejs_service')||''}"/></div>
       <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="ejs-template" placeholder="template_xxxxxxx" value="${localStorage.getItem('ejs_template')||''}"/></div>
       <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="ejs-key" placeholder="your_public_key" value="${localStorage.getItem('ejs_key')||''}"/></div>
@@ -1733,7 +1734,9 @@ function saveEmailSettings(){
   localStorage.setItem('ejs_template',template);
   localStorage.setItem('ejs_key',key);
   localStorage.setItem('ejs_test_email',testEmail);
-  if(_fbReady&&_db) _db.collection('settings').doc('emailjs').set({service,template,key,testEmail},{merge:true}).catch(e=>console.warn('email settings save error',e));
+  const adminNotifyEmail = document.getElementById('admin-notify-email')?.value?.trim() || localStorage.getItem('admin_notify_email') || '';
+  if(adminNotifyEmail) localStorage.setItem('admin_notify_email', adminNotifyEmail);
+  if(_fbReady&&_db) _db.collection('settings').doc('emailjs').set({service,template,key,testEmail,adminNotifyEmail},{merge:true}).catch(e=>console.warn('email settings save error',e));
   toast('Email settings saved!');
 }
 
@@ -2803,60 +2806,74 @@ function openTaskModal(){
 function closeTaskModal(){ document.getElementById('task-modal-overlay')?.remove(); }
 
 function saveTask(){
-  try{
-  const title=document.getElementById('tm-title').value.trim();
-  const assignee=document.getElementById('tm-assignee').value.trim();
-  const due=document.getElementById('tm-due').value;
+  const title=document.getElementById('tm-title')?.value.trim();
+  const assignee=document.getElementById('tm-assignee')?.value.trim();
+  const due=document.getElementById('tm-due')?.value;
   if(!title||!assignee||!due){toast('Title, email & due date are required','var(--red)');return;}
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignee)){toast('Please enter a valid email address','var(--red)');return;}
-  const tags=document.getElementById('tm-tags').value.split(',').map(s=>s.trim()).filter(Boolean);
-  if(editTaskId){
-    const t=getTask(editTaskId);
-    const newPriority=document.getElementById('tm-priority').value;
-    const newStatus=document.getElementById('tm-status').value;
-    const updated={...t,title,desc:document.getElementById('tm-desc').value,assignee,priority:newPriority,status:newStatus,due,reminder:document.getElementById('tm-reminder').value,tags};
-    updateTask(updated);
-    // ── Auto-notify assignee of what changed ───────────────────────
-    const changes=[];
-    if(assignee!==t.assignee)         changes.push({reason:'assigned',     detail:'Reassigned to '+assignee});
-    if(due!==t.due)                   changes.push({reason:'date_change',  detail:'Due date → '+fmt(due)});
-    if(newPriority!==t.priority)      changes.push({reason:'priority_change',detail:'Priority → '+newPriority});
-    if(newStatus!==t.status)          changes.push({reason:'status_change', detail:'Status → '+newStatus});
-    if(changes.length===0 && (title!==t.title||document.getElementById('tm-desc').value!==t.desc))
-      changes.push({reason:'updated', detail:'Task details updated'});
-    // Send one email per changed field (or a single "updated" email)
-    changes.forEach(({reason,detail})=>notifyAssignee(updated, reason, {changeDetail:detail}));
-    if(changes.length===0) toast('Task updated (no changes to notify).');
-  } else {
-    const nt={id:uid(),title,desc:document.getElementById('tm-desc').value,assignee,priority:document.getElementById('tm-priority').value,status:document.getElementById('tm-status').value,due,created:today(),token:uid(),replies:[],attachments:[],reminder:document.getElementById('tm-reminder').value,tags,plant:plantOwnerAuthenticated&&currentPlantSession?currentPlantSession.id:undefined};
-    tasks=[nt,...tasks];
-    localStorage.setItem('tf_tasks',JSON.stringify(tasks));
-    if(_fbReady&&_db) _db.collection('tasks').doc(nt.id).set(nt).catch(e=>console.warn('addTask error',e));
-    const cfg=getEmailConfig();
-    if(cfg.service&&cfg.template&&cfg.key){
-      // EmailJS configured — send automatically
-      sendTaskEmail(nt,'assigned').then(ok=>{
-        if(ok) toast('✅ Task created & email sent to '+assignee+'!');
-        else {
-          toast('Task created! Opening mail client…','var(--amber)');
+
+  try{
+    const tags=document.getElementById('tm-tags').value.split(',').map(s=>s.trim()).filter(Boolean);
+
+    if(editTaskId){
+      const t=getTask(editTaskId);
+      const newPriority=document.getElementById('tm-priority').value;
+      const newStatus=document.getElementById('tm-status').value;
+      const updated={...t,title,desc:document.getElementById('tm-desc').value,assignee,priority:newPriority,status:newStatus,due,reminder:document.getElementById('tm-reminder').value,tags};
+      updateTask(updated);
+      // close modal & refresh UI immediately
+      closeTaskModal(); refreshOverdueBadge(); showPanel(currentPanel);
+      // notify assignee of what changed
+      const changes=[];
+      if(assignee!==t.assignee)    changes.push({reason:'assigned',      detail:'Reassigned to '+assignee});
+      if(due!==t.due)              changes.push({reason:'date_change',   detail:'Due date → '+fmt(due)});
+      if(newPriority!==t.priority) changes.push({reason:'priority_change',detail:'Priority → '+newPriority});
+      if(newStatus!==t.status)     changes.push({reason:'status_change', detail:'Status → '+newStatus});
+      if(changes.length===0 && (title!==t.title||document.getElementById('tm-desc')?.value!==t.desc))
+        changes.push({reason:'updated', detail:'Task details updated'});
+      changes.forEach(({reason,detail})=>notifyAssignee(updated, reason, {changeDetail:detail}));
+      if(changes.length===0) toast('Task updated (no changes to notify).');
+
+    } else {
+      const nt={
+        id:uid(), title,
+        desc:document.getElementById('tm-desc').value,
+        assignee,
+        priority:document.getElementById('tm-priority').value,
+        status:document.getElementById('tm-status').value,
+        due, created:today(), token:uid(),
+        replies:[], attachments:[],
+        reminder:document.getElementById('tm-reminder').value,
+        tags,
+        plant: plantOwnerAuthenticated&&currentPlantSession ? currentPlantSession.id : undefined
+      };
+      tasks=[nt,...tasks];
+      localStorage.setItem('tf_tasks',JSON.stringify(tasks));
+      if(_fbReady&&_db) _db.collection('tasks').doc(nt.id).set(nt).catch(e=>console.warn('addTask error',e));
+
+      // Close modal & refresh UI immediately — before async email
+      closeTaskModal(); refreshOverdueBadge(); showPanel(currentPanel);
+
+      const cfg=getEmailConfig();
+      if(cfg.service&&cfg.template&&cfg.key){
+        // Send to assignee
+        sendTaskEmail(nt,'assigned').then(ok=>{
+          if(ok) toast('\u2705 Task created & email sent to '+assignee+'!');
+          else   toast('Task created! Could not send email — check EmailJS settings.','var(--amber)');
+        }).catch(e=>{
+          console.warn('sendTaskEmail error:',e);
+          toast('Task created! Email failed — check EmailJS settings.','var(--amber)');
+        });
+        // Always notify admin when ANY user (admin or plant owner) creates a task
+        sendAdminTaskCreationEmail(nt);
+      } else {
+        toast('\u2705 Task created for '+assignee+'!');
+        try{
           const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
           openMailtoFallback(nt,taskLink);
-        }
-      }).catch(e=>{
-        console.warn('sendTaskEmail unexpected error:',e);
-        toast('Task created! Opening mail client…','var(--amber)');
-        const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
-        openMailtoFallback(nt,taskLink);
-      });
-    } else {
-      // No EmailJS — automatically open mailto (pre-filled email) right away
-      toast('Task created! Opening mail client for '+assignee+'…','var(--accent)');
-      const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
-      openMailtoFallback(nt,taskLink);
+        }catch(mailErr){ console.warn('mailto fallback failed:',mailErr); }
+      }
     }
-  }
-  closeTaskModal(); refreshOverdueBadge();
-  showPanel(currentPanel);
   }catch(err){
     console.error('saveTask error:',err);
     toast('Error saving task: '+err.message,'var(--red)');
@@ -3755,6 +3772,38 @@ async function sendReplyNotificationEmail(task, reply){
     console.warn('Reply notification email failed', e);
   }
 }
+
+// ── Admin notification on task creation (by plant owner) ─────────────
+async function sendAdminTaskCreationEmail(task){
+  const cfg = getEmailConfig();
+  if(!cfg.service||!cfg.template||!cfg.key) return;
+  const adminEmail = localStorage.getItem('admin_notify_email') || '';
+  if(!adminEmail) return;
+  const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
+  try{
+    if(typeof emailjs === 'undefined') throw new Error('EmailJS library not loaded');
+    emailjs.init(cfg.key);
+    await emailjs.send(cfg.service, cfg.template, {
+      to_email:      adminEmail,
+      to_name:       'Admin',
+      task_title:    task.title,
+      task_desc:     '📋 New task created by plant owner and assigned to: ' + task.assignee + '\n\n' + (task.desc||'No description.'),
+      task_link:     taskLink,
+      due_date:      fmt(task.due),
+      priority:      task.priority,
+      status:        task.status,
+      reminder:      task.reminder||'',
+      reason:        'task_created',
+      reason_label:  'New Task Created',
+      change_detail: 'Plant owner created task: ' + task.title + ' → assigned to ' + task.assignee,
+      from_name:     'POLYPLASTICS Task Manager'
+    });
+    console.log('Admin task-creation notification sent to', adminEmail);
+  }catch(e){
+    console.warn('Admin task-creation email failed', e);
+  }
+}
+
 
 </script>
 </body>
