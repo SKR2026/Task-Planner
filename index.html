@@ -265,7 +265,6 @@
 
   /* ─── plant owner mode — hide non-plant nav items ─── */
   body.plant-owner-mode .admin-only-nav { display: none !important; }
-  body.plant-owner-mode .plant-owner-nav { display: block !important; }
   body.plant-owner-mode #plant-nav-items .nav-item { display: flex; }
 
   /* ─── animations ─── */
@@ -313,17 +312,6 @@
         <div class="nav-section">Management</div>
         <div class="nav-item" onclick="showPanel('reminders')"><span class="nav-icon">🔔</span><span>Reminders</span></div>
         <div class="nav-item" onclick="showPanel('team')"><span class="nav-icon">👥</span><span>Team</span></div>
-      </div>
-      <!-- Plant owner nav — visible only in plant-owner-mode -->
-      <div class="plant-owner-nav" style="display:none">
-        <div class="nav-section">Plant View</div>
-        <div class="nav-item" onclick="showPanel('plant')"><span class="nav-icon">📊</span><span>Overview</span></div>
-        <div class="nav-item" onclick="showPanel('plant-tasks')"><span class="nav-icon">📋</span><span>All Tasks</span></div>
-        <div class="nav-item" onclick="showPanel('plant-mytasks')"><span class="nav-icon">✅</span><span>My Tasks</span></div>
-        <div class="nav-item" onclick="showPanel('plant-kanban')"><span class="nav-icon">🗂</span><span>Kanban Board</span></div>
-        <div class="nav-section">Management</div>
-        <div class="nav-item" onclick="showPanel('plant-reminders')"><span class="nav-icon">🔔</span><span>Reminders</span></div>
-        <div class="nav-item" onclick="showPanel('plant-team')"><span class="nav-icon">👥</span><span>Team</span></div>
       </div>
       <div class="nav-section">🏭 Plants</div>
       <div id="plant-nav-items"><!-- rendered by renderPlantNav() --></div>
@@ -631,9 +619,9 @@ function showPanel(name){
   // SECURITY: If in user mode, only the 'user' panel is allowed.
   if(mode==='user' && name!=='user'){ name='user'; }
   // SECURITY: If in plant owner mode, only plant-related panels are allowed.
-  if(plantOwnerAuthenticated && !['plant','plant-tasks','plant-mytasks','plant-kanban','plant-reminders','plant-team','settings'].includes(name)){
+  if(plantOwnerAuthenticated && !['plant','settings'].includes(name)){
     if(['dashboard','tasks','kanban','reminders','team','mytasks'].includes(name)){
-      name='plant'; // redirect legacy names to overview
+      name='plant'; // redirect to their plant panel
     }
   }
   currentPanel=name;
@@ -643,14 +631,12 @@ function showPanel(name){
   document.getElementById('btn-new-task').style.display=((mode==='admin'||plantOwnerAuthenticated)&&name!=='user')?'flex':'none';
   document.getElementById('btn-bulk-upload').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
   document.getElementById('btn-export').style.display=(mode==='admin'&&name!=='user')?'flex':'none';
-  const panels={dashboard:renderDashboard,tasks:renderTasks,mytasks:renderMyTasks,kanban:renderKanban,reminders:renderReminders,team:renderTeam,settings:renderSettings,user:renderUser,plant:renderPlantPanel,
-    'plant-tasks':renderPlantTasks,'plant-mytasks':renderPlantMyTasks,'plant-kanban':renderPlantKanban,'plant-reminders':renderPlantReminders,'plant-team':renderPlantTeam};
+  const panels={dashboard:renderDashboard,tasks:renderTasks,mytasks:renderMyTasks,kanban:renderKanban,reminders:renderReminders,team:renderTeam,settings:renderSettings,user:renderUser,plant:renderPlantPanel};
   const fn=panels[name];
   if(fn){ document.getElementById('content').innerHTML=''; fn(); }
-  const titles={dashboard:'Dashboard',tasks:'All Tasks',mytasks:'My Tasks',kanban:'Kanban Board',reminders:'Reminders',team:'Team',settings:'Settings',user:'My Tasks',plant:'Plant Overview',
-    'plant-tasks':'All Tasks','plant-mytasks':'My Tasks','plant-kanban':'Kanban Board','plant-reminders':'Reminders','plant-team':'Team'};
-  if(plantOwnerAuthenticated && currentPlantSession && ['plant','plant-tasks','plant-mytasks','plant-kanban','plant-reminders','plant-team'].includes(name)){
-    document.getElementById('topbar-title').textContent='🏭 '+currentPlantSession.name+' — '+titles[name];
+  const titles={dashboard:'Dashboard',tasks:'All Tasks',mytasks:'My Tasks',kanban:'Kanban Board',reminders:'Reminders',team:'Team',settings:'Settings',user:'My Tasks',plant:'Plant Overview'};
+  if(plantOwnerAuthenticated && currentPlantSession && name==='plant'){
+    document.getElementById('topbar-title').textContent='🏭 '+currentPlantSession.name;
   } else {
     document.getElementById('topbar-title').textContent=titles[name]||name;
   }
@@ -969,15 +955,9 @@ function showPlantPanel(id){
 
 function renderPlantPanel(){
   if(mode==='user'){showPanel('user');return;}
-  let plant;
-  if(plantOwnerAuthenticated && currentPlantSession){
-    plant = currentPlantSession;
-    _activePlantId = plant.id;
-  } else {
-    const groups=getPlantGroups();
-    if(!_activePlantId&&groups.length) _activePlantId=groups[0]?.id;
-    plant=groups.find(p=>p.id===_activePlantId);
-  }
+  const groups=getPlantGroups();
+  if(!_activePlantId&&groups.length) _activePlantId=groups[0]?.id;
+  const plant=groups.find(p=>p.id===_activePlantId);
   const c=document.getElementById('content');
   if(!plant){
     c.innerHTML=`<div class="panel-title fade-in">Plant Overview</div><div class="panel-sub">No plant selected. <a onclick="showPanel('settings')" style="color:var(--accent);cursor:pointer">Add plants in Settings →</a></div>`;
@@ -1046,15 +1026,8 @@ function renderPlantPanel(){
 
 // ── Render filtered task rows inside the plant panel ─────────────────
 function renderPlantTaskRows(filter){
-  // In plant owner mode, use the session plant directly instead of re-reading
-  // from getPlantGroups() which may be empty if plants are stored in Firestore only.
-  let plant;
-  if(plantOwnerAuthenticated && currentPlantSession){
-    plant = currentPlantSession;
-  } else {
-    const groups=getPlantGroups();
-    plant=groups.find(p=>p.id===_activePlantId);
-  }
+  const groups=getPlantGroups();
+  const plant=groups.find(p=>p.id===_activePlantId);
   if(!plant) return;
   const owners=(plant.owners||[]).map(o=>o.toLowerCase());
   const plantTasks=tasks.filter(t=>owners.includes((t.assignee||'').toLowerCase())||(t.plant&&t.plant===plant.id));
@@ -1120,243 +1093,7 @@ function renderPlantTaskRows(filter){
     </div>`).join('');
 }
 
-
-// ═══════════════════════════════════════════════════════════════════════
-//  PLANT OWNER — All Tasks (filtered to this plant)
-// ═══════════════════════════════════════════════════════════════════════
-let plantTaskFilters={status:'All',priority:'All',search:'',overdue:false};
-
-function getPlantTasks(){
-  const plant = (plantOwnerAuthenticated && currentPlantSession) ? currentPlantSession : (getPlantGroups().find(p=>p.id===_activePlantId)||null);
-  if(!plant) return [];
-  const owners=(plant.owners||[]).map(o=>o.toLowerCase());
-  return tasks.filter(t=>owners.includes((t.assignee||'').toLowerCase())||(t.plant&&t.plant===plant.id));
-}
-
-function renderPlantTasks(){
-  const plantTasks=getPlantTasks();
-  plantTaskFilters={status:'All',priority:'All',search:'',overdue:false};
-  const c=document.getElementById('content');
-  c.innerHTML=`
-  <div class="panel-title fade-in">📋 All Tasks</div>
-  <div class="panel-sub">${plantTasks.length} tasks for ${esc(currentPlantSession?.name||'this plant')}</div>
-  <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;align-items:center" class="fade-in">
-    <input id="ptf-search" class="form-input" style="max-width:280px;padding:9px 13px" placeholder="🔍  Search tasks…" oninput="plantTaskFilters.search=this.value;renderPlantTaskFilteredRows()"/>
-    <select id="ptf-status" class="form-select" style="max-width:160px" onchange="plantTaskFilters.status=this.value;plantTaskFilters.overdue=false;renderPlantTaskFilteredRows()">
-      <option>All</option>${STATUSES.map(s=>`<option>${s}</option>`).join('')}
-    </select>
-    <select id="ptf-prio" class="form-select" style="max-width:140px" onchange="plantTaskFilters.priority=this.value;renderPlantTaskFilteredRows()">
-      <option>All</option>${PRIOS.map(p=>`<option>${p}</option>`).join('')}
-    </select>
-    <button class="btn btn-ghost btn-sm" onclick="plantTaskFilters={status:'All',priority:'All',search:'',overdue:false};renderPlantTasks()">Reset</button>
-  </div>
-  <div id="plant-filtered-rows" class="fade-in"></div>`;
-  renderPlantTaskFilteredRows();
-}
-
-function renderPlantTaskFilteredRows(){
-  const plantTasks=getPlantTasks();
-  const filtered=plantTasks.filter(t=>{
-    const ss=(plantTaskFilters.overdue===true)?isOverdue(t):(plantTaskFilters.status==='All'||t.status===plantTaskFilters.status);
-    const sp=plantTaskFilters.priority==='All'||t.priority===plantTaskFilters.priority;
-    const sq=!plantTaskFilters.search||t.title.toLowerCase().includes(plantTaskFilters.search.toLowerCase())||t.assignee.toLowerCase().includes(plantTaskFilters.search.toLowerCase());
-    return ss&&sp&&sq;
-  });
-  const el=document.getElementById('plant-filtered-rows');
-  if(!el) return;
-  if(!filtered.length){el.innerHTML='<div class="empty"><div class="empty-icon">🔍</div><div>No tasks match your filters</div></div>';return;}
-  el.innerHTML=filtered.map(t=>`
-    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openDrawer('${t.id}')">
-      <div class="task-row-body">
-        <div class="task-title">${esc(t.title)}</div>
-        <div class="task-meta">
-          <span>👤 ${esc(t.assignee)}</span>
-          <span>📅 <span style="color:${isOverdue(t)?'var(--red)':\'inherit'}">${fmt(t.due)}</span></span>
-          ${(t.replies||[]).length?`<span>💬 ${(t.replies||[]).length}</span>`:''}
-          ${isOverdue(t)?'<span style="color:var(--red);font-weight:600">Overdue</span>':''}
-          ${t.tags&&t.tags.length?t.tags.map(tag=>`<span style="background:rgba(91,141,238,.1);color:var(--accent);border:1px solid rgba(91,141,238,.2);border-radius:4px;padding:1px 6px;font-size:10px">${tag}</span>`).join(''):''}
-        </div>
-      </div>
-      <div class="task-actions" onclick="event.stopPropagation()">
-        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
-        <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
-        ${isOverdue(t)?'<span class="badge badge-overdue">Overdue</span>':''}
-      </div>
-    </div>`).join('');
-}
-
 // ── Dashboard plant performance grid ─────────────────────────────────
-
-// ═══════════════════════════════════════════════════════════════════════
-//  PLANT OWNER — My Tasks
-// ═══════════════════════════════════════════════════════════════════════
-function renderPlantMyTasks(){
-  const plant=(plantOwnerAuthenticated&&currentPlantSession)?currentPlantSession:null;
-  const owners=plant?(plant.owners||[]).map(o=>o.toLowerCase()):[];
-  const plantTasks=getPlantTasks();
-  const myTasks=plantTasks.filter(t=>owners.includes((t.assignee||'').toLowerCase()));
-  const done=myTasks.filter(t=>t.status==='Done').length;
-  const overdue=myTasks.filter(isOverdue).length;
-  const rate=myTasks.length?Math.round(done/myTasks.length*100):0;
-  const c=document.getElementById('content');
-  c.innerHTML=`
-  <div class="panel-title fade-in">✅ My Tasks</div>
-  <div class="panel-sub">Tasks assigned to ${esc((plant?.owners||[]).join(', ')||'plant owners')}</div>
-  <div class="stats-grid fade-in" style="max-width:600px;margin-bottom:22px">
-    <div class="stat-card" style="--c:var(--accent)"><div class="stat-icon">📋</div><div class="stat-value">${myTasks.length}</div><div class="stat-label">Total</div></div>
-    <div class="stat-card" style="--c:var(--green)"><div class="stat-icon">✅</div><div class="stat-value">${done}</div><div class="stat-label">Done</div></div>
-    <div class="stat-card" style="--c:var(--red)"><div class="stat-icon">🚨</div><div class="stat-value">${overdue}</div><div class="stat-label">Overdue</div></div>
-    <div class="stat-card" style="--c:var(--cyan)"><div class="stat-icon">📈</div><div class="stat-value">${rate}%</div><div class="stat-label">Completion</div></div>
-  </div>
-  <div class="fade-in">
-  ${myTasks.length===0?'<div class="empty"><div class="empty-icon">🎉</div><div>No tasks assigned to plant owners!</div></div>':
-    [...myTasks].sort((a,b)=>(a.due||'').localeCompare(b.due||'')).map(t=>`
-    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openDrawer('${t.id}')">
-      <div class="task-row-body">
-        <div class="task-title">${esc(t.title)}</div>
-        <div class="task-meta">
-          <span>👤 ${esc(t.assignee)}</span>
-          <span>📅 <span style="color:${isOverdue(t)?'var(--red)':\'inherit'}">${fmt(t.due)}</span></span>
-          ${(t.replies||[]).length?`<span>💬 ${(t.replies||[]).length}</span>`:''}
-          ${isOverdue(t)?'<span style="color:var(--red);font-weight:600">Overdue</span>':''}
-        </div>
-      </div>
-      <div class="task-actions" onclick="event.stopPropagation()">
-        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
-        <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
-        ${isOverdue(t)?'<span class="badge badge-overdue">Overdue</span>':''}
-      </div>
-    </div>`).join('')}
-  </div>`;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  PLANT OWNER — Kanban Board
-// ═══════════════════════════════════════════════════════════════════════
-function renderPlantKanban(){
-  const plantTasks=getPlantTasks();
-  const c=document.getElementById('content');
-  function kanbanCard(t){
-    try{
-      const overdue=isOverdue(t);
-      const replies=(t.replies||[]).length;
-      return `<div class="kanban-card" style="--lc:${PRIO_COLOR[t.priority]||'var(--border)'}" onclick="openDrawer('${t.id}')">
-        <div class="kanban-card-title">${esc(t.title||'Untitled')}</div>
-        <div style="display:flex;gap:5px;margin-bottom:7px;flex-wrap:wrap">
-          <span class="badge ${prioBadgeClass(t.priority)}">${t.priority||''}</span>
-          ${overdue?'<span class="badge badge-overdue">Overdue</span>':''}
-        </div>
-        <div class="kanban-card-meta">
-          <div style="margin-bottom:3px">👤 ${esc(t.assignee||'Unassigned')}</div>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="color:${overdue?'var(--red)':\'inherit'}">📅 ${t.due?fmt(t.due):'No date'}</span>
-            <span>${replies?`💬${replies} `:''}</span>
-          </div>
-        </div>
-      </div>`;
-    }catch(e){return '';}
-  }
-  function kanbanCol(status){
-    const col=plantTasks.filter(t=>t.status===status);
-    const color=STATUS_COLOR[status]||'var(--text3)';
-    const cards=col.map(kanbanCard).join('');
-    const empty=col.length===0?`<div style="text-align:center;padding:24px 0;color:var(--text3);font-size:12px;border:2px dashed var(--border);border-radius:var(--radius)">Empty</div>`:''
-    return `<div>
-      <div class="kanban-col-header">
-        <div class="kanban-dot" style="background:${color}"></div>
-        <div class="kanban-col-title" style="color:${color}">${status}</div>
-        <div class="kanban-count">${col.length}</div>
-      </div>
-      <div>${cards}${empty}</div>
-    </div>`;
-  }
-  const cols=STATUSES.map(kanbanCol).join('');
-  c.innerHTML=`
-    <div class="panel-title fade-in">🗂 Kanban Board</div>
-    <div class="panel-sub">Plant task board — click any card to view details</div>
-    <div class="kanban fade-in">${cols}</div>`;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  PLANT OWNER — Reminders
-// ═══════════════════════════════════════════════════════════════════════
-function renderPlantReminders(){
-  const plantTasks=getPlantTasks();
-  const active=plantTasks.filter(t=>t.reminder&&t.reminder!=='none'&&t.status!=='Done');
-  const overdue=plantTasks.filter(isOverdue);
-  const c=document.getElementById('content');
-  c.innerHTML=`
-  <div class="panel-title fade-in">🔔 Reminders</div>
-  <div class="panel-sub">Active reminders for ${esc(currentPlantSession?.name||'this plant')}</div>
-  <div class="stats-grid fade-in" style="max-width:500px;margin-bottom:22px">
-    <div class="stat-card" style="--c:var(--amber)"><div class="stat-icon">🔔</div><div class="stat-value">${active.length}</div><div class="stat-label">Active Reminders</div></div>
-    <div class="stat-card" style="--c:var(--red)"><div class="stat-icon">⚠</div><div class="stat-value">${overdue.length}</div><div class="stat-label">Overdue</div></div>
-  </div>
-  ${active.length?`
-  <div class="card fade-in" style="margin-bottom:14px">
-    <div class="section-head" style="margin-bottom:14px">⏰ Active Reminder Schedule</div>
-    ${active.map(t=>`
-    <div class="reminder-item">
-      <div class="reminder-icon" style="background:rgba(251,191,36,.1)">${({daily:'📅',weekly:'📆','3days':'🗓',on_due:'🔔'})[t.reminder]||'🔔'}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:13.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.title)}</div>
-        <div style="font-size:12px;color:var(--text3)">${esc(t.assignee)} · Due ${fmt(t.due)}</div>
-      </div>
-      <span class="badge badge-medium">${t.reminder}</span>
-    </div>`).join('')}
-  </div>`:''}
-  ${overdue.length?`
-  <div class="card fade-in" style="border-color:rgba(248,113,113,.3)">
-    <div class="section-head" style="color:var(--red);margin-bottom:14px">🚨 Overdue Tasks</div>
-    ${overdue.map(t=>`
-    <div class="reminder-item">
-      <div class="reminder-icon" style="background:rgba(248,113,113,.1)">🔴</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:13.5px;color:var(--text)">${esc(t.title)}</div>
-        <div style="font-size:12px;color:var(--red)">${esc(t.assignee)} · Was due ${fmt(t.due)}</div>
-      </div>
-      <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
-    </div>`).join('')}
-  </div>`:''}`;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  PLANT OWNER — Team
-// ═══════════════════════════════════════════════════════════════════════
-function renderPlantTeam(){
-  const plantTasks=getPlantTasks();
-  const uniqueEmails=[...new Set(plantTasks.map(t=>t.assignee.toLowerCase()))];
-  const members=uniqueEmails.map(email=>{
-    const myTasks=plantTasks.filter(t=>t.assignee.toLowerCase()===email);
-    return{email,total:myTasks.length,done:myTasks.filter(t=>t.status==='Done').length,inprog:myTasks.filter(t=>t.status==='In Progress').length,overdue:myTasks.filter(isOverdue).length};
-  });
-  const c=document.getElementById('content');
-  c.innerHTML=`
-  <div class="panel-title fade-in">👥 Team</div>
-  <div class="panel-sub">${members.length} members in ${esc(currentPlantSession?.name||'this plant')}</div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px" class="fade-in">
-  ${members.map(m=>{
-    const pct=m.total?Math.round(m.done/m.total*100):0;
-    const initials=m.email.slice(0,2).toUpperCase();
-    const colors=['var(--accent)','var(--purple)','var(--green)','var(--amber)','var(--cyan)'];
-    const color=colors[m.email.charCodeAt(0)%colors.length];
-    return`<div class="card" style="border-top:3px solid ${color}">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-        <div style="width:44px;height:44px;border-radius:50%;background:${color}22;border:2px solid ${color}44;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:${color};flex-shrink:0">${initials}</div>
-        <div><div style="font-weight:700;font-size:14px;color:var(--text)">${m.email}</div><div style="font-size:11px;color:var(--text3)">Team Member</div></div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-        <div style="text-align:center;background:var(--bg);border-radius:8px;padding:8px"><div style="font-size:20px;font-weight:800;color:var(--accent)">${m.total}</div><div style="font-size:10px;color:var(--text3)">TOTAL</div></div>
-        <div style="text-align:center;background:var(--bg);border-radius:8px;padding:8px"><div style="font-size:20px;font-weight:800;color:var(--green)">${m.done}</div><div style="font-size:10px;color:var(--text3)">DONE</div></div>
-        <div style="text-align:center;background:var(--bg);border-radius:8px;padding:8px"><div style="font-size:20px;font-weight:800;color:var(--red)">${m.overdue}</div><div style="font-size:10px;color:var(--text3)">OVERDUE</div></div>
-      </div>
-      <div class="progress-bar" style="margin-bottom:5px"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>
-      <div style="font-size:11px;color:var(--text3)">${pct}% completion rate</div>
-    </div>`;
-  }).join('')}
-  </div>`;
-}
-
 function renderDashPlants(){
   const sec=document.getElementById('dash-plant-section');
   const grid=document.getElementById('dash-plant-grid');
@@ -2140,9 +1877,6 @@ function showAdminLoginScreen(){
           onkeydown="if(event.key==='Enter')adminLogin()"/>
       </div>
       <div id="admin-login-error" style="color:var(--red);font-size:13px;margin-bottom:10px;display:none">❌ Incorrect password. Try again.</div>
-      <div id="admin-login-hint" style="color:var(--text3);font-size:12px;margin-bottom:12px;padding:8px 12px;background:rgba(91,141,238,.07);border:1px solid rgba(91,141,238,.15);border-radius:8px;">
-        💡 Default password: <code style="color:var(--accent);font-family:monospace;">admin123</code> — change it in Settings after login.
-      </div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:10px" onclick="adminLogin()">🔓 Super Admin Login</button>
       <div style="text-align:center;font-size:12px;color:var(--text3);margin:8px 0">— or —</div>
       <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="showPlantOwnerLoginScreen()">🏭 Plant Owner Login</button>
@@ -2292,6 +2026,7 @@ function impersonatePlantOwner(plantId){
 }
 
 function exitImpersonation(){
+  if(!confirm('Exit plant owner view and return to super admin?')) return;
   plantOwnerAuthenticated = false;
   currentPlantSession = null;
   sessionStorage.removeItem('pg_impersonate_return');
@@ -2331,27 +2066,27 @@ function adminLogin(){
     document.getElementById('btn-admin-mode').style.display = '';
     document.getElementById('btn-user-mode').style.display = '';
     document.getElementById('btn-export').style.display = 'flex';
-    document.getElementById('btn-new-task').style.display = 'flex';
-    document.getElementById('btn-bulk-upload').style.display = 'flex';
     const sidebarBottom = document.querySelector('.sidebar-bottom');
     if(sidebarBottom){ sidebarBottom.style.display = ''; sidebarBottom.style.visibility = ''; }
     toast('Welcome back, Admin! 👋');
     showPanel('dashboard');
   };
-  // Try Firestore password first, fall back to localStorage, then default.
-  const DEFAULT_ADMIN_PASSWORD = 'admin123'; // default if never configured
+  // Try Firestore password first, fall back to localStorage.
+  // If no password has ever been configured, deny access (no default fallback).
   if(_fbReady&&_db){
     _db.collection('settings').doc('admin').get().then(d=>{
-      const stored = (d.exists&&d.data().password) ? d.data().password
-                   : (localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD);
-      localStorage.setItem('admin_password', stored);
+      const stored = (d.exists&&d.data().password) ? d.data().password : localStorage.getItem('admin_password');
+      if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+      localStorage.setItem('admin_password',stored);
       doLogin(stored);
     }).catch(()=>{
-      const stored = localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD;
+      const stored = localStorage.getItem('admin_password');
+      if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
       doLogin(stored);
     });
   } else {
-    const stored = localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD;
+    const stored = localStorage.getItem('admin_password');
+    if(!stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
     doLogin(stored);
   }
 }
@@ -2359,6 +2094,7 @@ function adminLogin(){
 // ── Logout ────────────────────────────────────────────────────────────
 function handleLogout(){
   if(mode==='user'){
+    if(!confirm('Log out?'))return;
     userEmail='';
     userTask=null;
     // Keep mode as 'user' — do NOT switch to admin after user logout
@@ -2381,6 +2117,7 @@ function handleLogout(){
       </div>`;
     return;
   } else if(plantOwnerAuthenticated){
+    if(!confirm('Log out of plant session?'))return;
     plantOwnerAuthenticated = false;
     currentPlantSession = null;
     sessionStorage.removeItem('pg_impersonate_return');
@@ -2394,6 +2131,7 @@ function handleLogout(){
     toast('Plant owner logged out');
   } else {
     // Admin logout — lock the dashboard and show login screen
+    if(!confirm('Log out of admin session?'))return;
     userEmail='';
     userTask=null;
     showAdminLoginScreen();
@@ -2920,7 +2658,7 @@ function changeAdminPassword(){
   const current=document.getElementById('pwd-current').value;
   const newPwd=document.getElementById('pwd-new').value;
   const confirm=document.getElementById('pwd-confirm').value;
-  const stored=localStorage.getItem('admin_password')||DEFAULT_ADMIN_PASSWORD;
+  const stored=localStorage.getItem('admin_password')||'';
   const statusEl=document.getElementById('pwd-status');
   if(current!==stored){statusEl.style.color='var(--red)';statusEl.textContent='❌ Current password is incorrect';return;}
   if(newPwd.length<6){statusEl.style.color='var(--red)';statusEl.textContent='❌ New password must be at least 6 characters';return;}
@@ -3685,8 +3423,6 @@ if(mode !== 'user'){
     document.getElementById('btn-admin-mode').style.display = '';
     document.getElementById('btn-user-mode').style.display = '';
     document.getElementById('btn-export').style.display = 'flex';
-    document.getElementById('btn-new-task').style.display = 'flex';
-    document.getElementById('btn-bulk-upload').style.display = 'flex';
     const sb = document.querySelector('.sidebar-bottom');
     if(sb){ sb.style.display=''; sb.style.visibility=''; }
     showPanel('dashboard');
