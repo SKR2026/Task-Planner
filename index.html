@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<!-- Email via registered mail ID (mailto) — no third-party library needed -->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root {
     --bg:        #08090d;
@@ -430,13 +430,13 @@ let _unsubscribeTasks = null;
         _db.collection('settings').doc('admin').get().then(d=>{
           if(d.exists&&d.data().password) localStorage.setItem('admin_password',d.data().password);
         }).catch(()=>{});
-        _db.collection('settings').doc('email').get().then(d=>{
+        _db.collection('settings').doc('emailjs').get().then(d=>{
           if(d.exists){
             const s=d.data();
-            if(s.registeredMailId) localStorage.setItem('registered_mail_id',s.registeredMailId);
-            if(s.w3fKey) localStorage.setItem('w3f_access_key',s.w3fKey);
-            if(s.testEmail)        localStorage.setItem('reg_test_email',s.testEmail);
-            if(s.adminNotify)      localStorage.setItem('admin_notify_email',s.adminNotify);
+            if(s.service)   localStorage.setItem('ejs_service',s.service);
+            if(s.template)  localStorage.setItem('ejs_template',s.template);
+            if(s.key)       localStorage.setItem('ejs_key',s.key);
+            if(s.testEmail) localStorage.setItem('ejs_test_email',s.testEmail);
           }
         }).catch(()=>{});
         _db.collection('settings').doc('plantGroups').get().then(d=>{
@@ -475,8 +475,9 @@ let _unsubscribeTasks = null;
                     // Only notify admin if reply is NOT from Admin
                     if(r.author !== 'Admin'){
                       addNotification(newT.id, newT.title, r.author, r.text || '(attachment)');
-                      // Send mailto notification to admin if admin notify email is set
-                      if(localStorage.getItem('admin_notify_email')){
+                      // Also send email notification to admin if EmailJS is configured
+                      const cfg = getEmailConfig();
+                      if(cfg.service && cfg.template && cfg.key){
                         sendReplyNotificationEmail(newT, r);
                       }
                     }
@@ -1382,7 +1383,7 @@ function renderReminders(){
       <div style="color:var(--text3);font-size:12px">— TaskFlow Project Manager</div>
     </div>
     <div style="margin-top:12px;padding:12px;background:rgba(91,141,238,.05);border-radius:var(--radius);border:1px dashed rgba(91,141,238,.2);font-size:12px;color:var(--text2)">
-      <strong style="color:var(--green)">📌 Emails ready to send!</strong> Go to <strong>Settings → Email</strong>, save your Registered Mail ID. Click <strong>📧</strong> on any task — your mail client opens pre-filled and ready.
+      <strong style="color:var(--accent)">📌 To enable real emails:</strong> Integrate with <a href="https://emailjs.com" style="color:var(--accent)">EmailJS</a> (free) or <a href="https://resend.com" style="color:var(--accent)">Resend.com</a>. See README for setup instructions.
     </div>
   </div>`;
 }
@@ -1469,43 +1470,40 @@ function renderSettings(){
     </div>
 
     <div class="card">
-      <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">📧 Automatic Email (Web3Forms)</div>
+      <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">📧 Email Integration (EmailJS)</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:16px">
-        Emails send automatically — no mail client pop-up needed. Free · 250 emails/day · Takes 60 seconds to set up.
-        ${localStorage.getItem('w3f_access_key')
-          ? '<span style="color:var(--green);font-weight:600;margin-left:8px">✅ Web3Forms configured — emails send automatically</span>'
-          : '<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ Not configured — complete setup below</span>'}
+        Configure EmailJS to send automatic task assignment and reminder emails to assignees.
+        ${(localStorage.getItem('ejs_service')&&localStorage.getItem('ejs_template')&&localStorage.getItem('ejs_key'))
+          ?'<span style="color:var(--green);font-weight:600;margin-left:8px">✅ Configured — emails will send automatically</span>'
+          :'<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ Not configured — using mailto fallback</span>'}
       </div>
 
-      <!-- Setup guide -->
+      <!-- Step by step guide -->
       <div style="background:rgba(91,141,238,.05);border:1px dashed rgba(91,141,238,.25);border-radius:var(--radius);padding:16px;margin-bottom:18px;font-size:12px;line-height:2;color:var(--text2)">
-        <div style="font-weight:700;color:var(--accent);margin-bottom:8px;font-size:13px">🚀 Setup in 60 Seconds (Free)</div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">1</span>Go to <a href="https://web3forms.com" target="_blank" style="color:var(--accent)">web3forms.com</a> → click <strong>Get your Access Key</strong></div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">2</span>Enter your company email (e.g. <code style="background:var(--card);padding:1px 6px;border-radius:3px">admin@polyplastics.com</code>) → click <strong>Create Access Key</strong></div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">3</span>Check your inbox → confirm the email from Web3Forms</div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">4</span>Copy the Access Key → paste it below → click <strong>Save Settings</strong> ✅</div>
+        <div style="font-weight:700;color:var(--accent);margin-bottom:8px;font-size:13px">📋 EmailJS Setup (Free — 200 emails/month)</div>
+        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">1</span>Go to <a href="https://emailjs.com" style="color:var(--accent)" target="_blank">emailjs.com</a> → Sign Up free</div>
+        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">2</span><strong>Email Services</strong> → Add New Service → Choose Gmail → Connect → Copy <code style="background:var(--card);padding:1px 6px;border-radius:3px">Service ID</code></div>
+        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">3</span><strong>Email Templates</strong> → Create New → Set <em>To Email</em> field to <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{to_email}}</code> → Copy <code style="background:var(--card);padding:1px 6px;border-radius:3px">Template ID</code></div>
+        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">4</span><strong>Account</strong> → API Keys → Copy <code style="background:var(--card);padding:1px 6px;border-radius:3px">Public Key</code></div>
+        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">5</span>Paste all three below → Click <strong>Save Settings</strong> → Send a test email ✅</div>
         <div style="margin-top:8px;padding:8px;background:var(--card);border-radius:6px;font-size:11px;color:var(--text3)">
-          <strong style="color:var(--green)">After setup:</strong> Every new task, status change, and reminder sends email automatically — no clicks needed.
-          <br>If Web3Forms is not configured, the system falls back to your default mail client.
+          <strong style="color:var(--green)">Template variables to use:</strong>
+          <code style="margin:0 4px">{{to_email}}</code>
+          <code style="margin:0 4px">{{to_name}}</code>
+          <code style="margin:0 4px">{{task_title}}</code>
+          <code style="margin:0 4px">{{task_desc}}</code>
+          <code style="margin:0 4px">{{task_link}}</code>
+          <code style="margin:0 4px">{{due_date}}</code>
+          <code style="margin:0 4px">{{priority}}</code>
+          <code style="margin:0 4px">{{status}}</code>
         </div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">Web3Forms Access Key <span style="font-size:10px;color:var(--text3)">(from web3forms.com — free)</span></label>
-        <input class="form-input" id="w3f-key-input" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('w3f_access_key')||''}"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Registered From Email <span style="font-size:10px;color:var(--text3)">(your company email — shown in emails as Reply-To)</span></label>
-        <input class="form-input" id="reg-mail-id" type="email" placeholder="admin@polyplastics.com" value="${localStorage.getItem('registered_mail_id')||''}"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Admin Notify Email <span style="font-size:10px;color:var(--text3)">(receives reply alerts)</span></label>
-        <input class="form-input" id="admin-notify-email" type="email" placeholder="admin@polyplastics.com" value="${localStorage.getItem('admin_notify_email')||''}" oninput="localStorage.setItem('admin_notify_email',this.value)"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Send Test Email To</label>
-        <input class="form-input" id="reg-test-email" type="email" placeholder="yourname@email.com" value="${localStorage.getItem('reg_test_email')||''}"/>
-      </div>
+      <div class="form-group"><label class="form-label">Admin Notify Email <span style="font-size:10px;color:var(--text3)">(receives reply alerts)</span></label><input class="form-input" id="admin-notify-email" placeholder="admin@company.com" value="${localStorage.getItem('admin_notify_email')||''}" oninput="localStorage.setItem('admin_notify_email',this.value)"/></div>
+      <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="ejs-service" placeholder="service_xxxxxxx" value="${localStorage.getItem('ejs_service')||''}"/></div>
+      <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="ejs-template" placeholder="template_xxxxxxx" value="${localStorage.getItem('ejs_template')||''}"/></div>
+      <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="ejs-key" placeholder="your_public_key" value="${localStorage.getItem('ejs_key')||''}"/></div>
+      <div class="form-group"><label class="form-label">Test Email (Send To)</label><input class="form-input" id="ejs-test-email" type="email" placeholder="your@email.com" value="${localStorage.getItem('ejs_test_email')||''}"/></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
         <button class="btn btn-primary" onclick="saveEmailSettings()">💾 Save Settings</button>
         <button class="btn btn-success" id="test-mail-btn" onclick="sendTestMail()">📨 Send Test Email</button>
@@ -1513,7 +1511,7 @@ function renderSettings(){
       <div id="test-mail-status" style="font-size:12px;color:var(--text3);margin-bottom:12px;min-height:18px"></div>
 
       <div style="padding:12px;background:rgba(52,211,153,.05);border-radius:var(--radius);border:1px solid rgba(52,211,153,.15);font-size:12px;color:var(--text2)">
-        <strong style="color:var(--green)">📌 No Web3Forms yet?</strong> The system works without it — task emails open in your mail client pre-filled. Configure Web3Forms to make emails <strong>fully automatic</strong>.
+        <strong style="color:var(--green)">📌 Already works without EmailJS!</strong> Click the <strong>📧</strong> button on any task to open your Gmail/Outlook pre-filled with the task details and magic link. Configure EmailJS above to make emails fully automatic.
       </div>
     </div>
 
@@ -1727,167 +1725,124 @@ function changePlantPassword(){
 }
 
 function saveEmailSettings(){
-  const mailId=(document.getElementById('reg-mail-id')?.value||'').trim();
-  const testEmail=(document.getElementById('reg-test-email')?.value||'').trim();
-  const adminNotify=(document.getElementById('admin-notify-email')?.value||'').trim();
-  const w3fKey=(document.getElementById('w3f-key-input')?.value||'').trim();
-  if(mailId && !/^[^@]+@[^@]+\.[^@]+$/.test(mailId)){
-    toast('Please enter a valid email address','var(--red)'); return;
-  }
-  localStorage.setItem('registered_mail_id', mailId);
-  localStorage.setItem('reg_test_email', testEmail);
-  if(adminNotify) localStorage.setItem('admin_notify_email', adminNotify);
-  if(w3fKey) localStorage.setItem('w3f_access_key', w3fKey);
-  if(_fbReady&&_db) _db.collection('settings').doc('email').set({registeredMailId:mailId,testEmail,adminNotify,w3fKey},{merge:true}).catch(e=>console.warn('email settings save error',e));
-  toast('✅ Email settings saved!');
-  renderSettings();
+  const service=document.getElementById('ejs-service').value;
+  const template=document.getElementById('ejs-template').value;
+  const key=document.getElementById('ejs-key').value;
+  const testEmail=document.getElementById('ejs-test-email').value||'';
+  localStorage.setItem('ejs_service',service);
+  localStorage.setItem('ejs_template',template);
+  localStorage.setItem('ejs_key',key);
+  localStorage.setItem('ejs_test_email',testEmail);
+  if(_fbReady&&_db) _db.collection('settings').doc('emailjs').set({service,template,key,testEmail},{merge:true}).catch(e=>console.warn('email settings save error',e));
+  toast('Email settings saved!');
 }
 
+// ── Email sending via EmailJS ──────────────────────────────────────────
+// ✏️  PASTE YOUR EMAILJS CREDENTIALS HERE FOR PERMANENT STORAGE:
+const EMAILJS_SERVICE_ID  = '';   // e.g. 'service_abc123'
+const EMAILJS_TEMPLATE_ID = '';   // e.g. 'template_xyz456'
+const EMAILJS_PUBLIC_KEY  = '';   // e.g. 'aBcDeFgHiJkLmNoPq'
 
-// Kept for backward-compatibility — always returns empty so no legacy path fires
 function getEmailConfig(){
-  return { service: '', template: '', key: '' };
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  AUTOMATIC EMAIL via Web3Forms (free, 250/day, zero-config SMTP)
-//  User registers at https://web3forms.com → gets an Access Key → pastes it in Settings
-// ═══════════════════════════════════════════════════════════════════════
-
-function getW3FKey(){ return localStorage.getItem('w3f_access_key')||''; }
-function getRegisteredMailId(){ return localStorage.getItem('registered_mail_id')||''; }
-
-function buildEmailBody(task, reason, changeDetail){
-  const introMap={
-    assigned:        'A new task has been assigned to you.',
-    updated:         'A task assigned to you has been updated.',
-    date_change:     'The due date of your task has been changed.',
-    priority_change: 'The priority of your task has been changed.',
-    status_change:   'The status of your task has been changed.',
-    reminder:        'This is a reminder about your pending task.',
-    test:            'This is a test email from POLYPLASTICS Task Manager. If you received this, email is working!',
+  return{
+    service:  localStorage.getItem('ejs_service')  || EMAILJS_SERVICE_ID,
+    template: localStorage.getItem('ejs_template') || EMAILJS_TEMPLATE_ID,
+    key:      localStorage.getItem('ejs_key')      || EMAILJS_PUBLIC_KEY
   };
-  const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-  const changeBlock = changeDetail ? `\n🔄 Change:      ${changeDetail}` : '';
-  return `Hi ${(task.assignee||'').split('@')[0]},
-
-${introMap[reason]||introMap.assigned}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📌 Task:       ${task.title}${changeBlock}
-📅 Due Date:   ${fmt(task.due)}
-⚡ Priority:   ${task.priority}
-📊 Status:     ${task.status}
-🔔 Reminder:   ${task.reminder}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-${task.desc ? '📝 Description:\n'+task.desc+'\n\n' : ''}
-🔗 View your tasks (no login needed):
-${taskLink}
-
-Regards,
-POLYPLASTICS Task Manager
-${getRegisteredMailId() ? 'From: '+getRegisteredMailId() : ''}`.trim();
 }
 
-function buildSubject(task, reason){
-  const map={
-    assigned:        '[POLYPLASTICS] Task Assigned: ',
-    updated:         '[POLYPLASTICS] Task Updated: ',
-    date_change:     '[POLYPLASTICS] Due Date Changed: ',
-    priority_change: '[POLYPLASTICS] Priority Changed: ',
-    status_change:   '[POLYPLASTICS] Status Changed: ',
-    reminder:        '[POLYPLASTICS] Reminder: ',
-    test:            '[POLYPLASTICS] Test Email from Task Manager',
-  };
-  return (map[reason]||map.assigned)+(reason==='test'?'':task.title);
-}
-
-async function sendAutoEmail(task, reason, extra={}){
-  const key = getW3FKey();
-  const changeDetail = extra.changeDetail||'';
-
-  if(!key){
-    // Fallback to mailto if Web3Forms not configured
-    const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-    openMailtoFallback(task, taskLink, reason, changeDetail);
-    return false;
-  }
-
-  const subject = buildSubject(task, reason);
-  const message = buildEmailBody(task, reason, changeDetail);
-  const fromName = 'POLYPLASTICS Task Manager';
-  const fromEmail = getRegisteredMailId() || 'noreply@polyplastics.com';
-
-  try{
-    const res = await fetch('https://api.web3forms.com/submit', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-      body: JSON.stringify({
-        access_key: key,
-        subject: subject,
-        from_name: fromName,
-        replyto: fromEmail,
-        to: task.assignee,
-        message: message,
-        botcheck: false,
-      })
-    });
-    const data = await res.json();
-    if(data.success){
-      toast('📧 Email sent automatically to '+task.assignee+'!', 'var(--green)');
-      return true;
-    } else {
-      console.warn('Web3Forms error:', data);
-      // Fallback to mailto
-      const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-      openMailtoFallback(task, taskLink, reason, changeDetail);
-      toast('⚠ Auto-email failed — mail client opened as fallback', 'var(--amber)');
-      return false;
-    }
-  } catch(e){
-    console.warn('Web3Forms fetch error:', e);
-    const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-    openMailtoFallback(task, taskLink, reason, changeDetail);
-    toast('⚠ Network error — mail client opened as fallback', 'var(--amber)');
-    return false;
-  }
-}
-
-// Backwards-compatible wrappers
 async function sendTaskEmail(task, reason='assigned', extra={}){
-  return sendAutoEmail(task, reason, extra);
+  const cfg=getEmailConfig();
+  if(!cfg.service||!cfg.template||!cfg.key){
+    console.warn('EmailJS not configured');
+    return false;
+  }
+  emailjs.init(cfg.key);
+  const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
+  // Human-readable subject line based on reason
+  const reasonLabels={
+    assigned:   'Task Assigned to You',
+    updated:    'Task Updated',
+    date_change:'Due Date Changed',
+    priority_change:'Priority Changed',
+    status_change:'Status Changed',
+    reminder:   'Task Reminder',
+    test:       'Test Email'
+  };
+  const changeDetail = extra.changeDetail || '';
+  try{
+    await emailjs.send(cfg.service, cfg.template, {
+      to_email:     task.assignee,
+      to_name:      task.assignee.split('@')[0],
+      task_title:   task.title,
+      task_desc:    task.desc||'No description provided.',
+      task_link:    taskLink,
+      due_date:     fmt(task.due),
+      priority:     task.priority,
+      status:       task.status,
+      reminder:     task.reminder,
+      reason:       reason,
+      reason_label: reasonLabels[reason]||reason,
+      change_detail:changeDetail,
+      from_name:    'POLYPLASTICS Task Manager'
+    });
+    return true;
+  }catch(e){
+    console.error('EmailJS error',e);
+    return false;
+  }
 }
 
+// Central notification dispatcher — tries EmailJS first, falls back to mailto
 async function notifyAssignee(task, reason, extra={}){
-  const key = getW3FKey();
-  if(!key){
-    const fromMail = getRegisteredMailId();
-    if(!fromMail) toast('⚠ Configure Web3Forms or Registered Mail in Settings → Email','var(--amber)');
+  const cfg=getEmailConfig();
+  const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
+  if(cfg.service&&cfg.template&&cfg.key){
+    const ok=await sendTaskEmail(task, reason, extra);
+    if(ok){
+      const labels={assigned:'assigned',updated:'updated',date_change:'date-change notified',
+                    priority_change:'priority-change notified',status_change:'status-change notified'};
+      toast('📧 Email sent to '+task.assignee+' ('+( labels[reason]||reason )+')'  );
+      return;
+    }
   }
-  return sendAutoEmail(task, reason, extra);
+  // Fallback: open mail client
+  openMailtoFallback(task, taskLink, reason, extra.changeDetail||'');
 }
 
 async function sendTestMail(){
-  const key = getW3FKey();
-  const fromMail = getRegisteredMailId();
-  const testEmail = (document.getElementById('reg-test-email')?.value?.trim()) || localStorage.getItem('reg_test_email') || '';
-  const status = document.getElementById('test-mail-status');
-  if(!testEmail){ toast('Enter a Test Email address first','var(--amber)'); return; }
-  if(!key && !fromMail){
-    toast('Configure Web3Forms key or Registered Mail ID in Settings first','var(--red)');
-    if(status){status.textContent='❌ Configure email settings first.';status.style.color='var(--red)';}
+  const cfg=getEmailConfig();
+  if(!cfg.service||!cfg.template||!cfg.key){
+    toast('Please fill & save EmailJS settings first','var(--red)');
+    const status=document.getElementById('test-mail-status');
+    if(status){status.textContent='❌ Missing Service ID, Template ID, or Public Key';status.style.color='var(--red)';}
     return;
   }
-  if(status){status.textContent='Sending test email…';status.style.color='var(--text3)';}
-  localStorage.setItem('reg_test_email', testEmail);
-  const fakeTask={assignee:testEmail,title:'Test Task — POLYPLASTICS Task Manager',
-    desc:'Email integration is working correctly!',
-    token:'test123',due:today(),priority:'Medium',status:'In Progress',reminder:'daily'};
-  const ok = await sendAutoEmail(fakeTask, 'test');
+  const testEmail=(document.getElementById('ejs-test-email')?.value?.trim())||localStorage.getItem('ejs_test_email')||'';
+  if(!testEmail){toast('Enter a Test Email address first','var(--amber)');return;}
+  
+  const btn=document.getElementById('test-mail-btn');
+  const status=document.getElementById('test-mail-status');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Sending…';}
+  if(status){status.textContent='Connecting to EmailJS…';status.style.color='var(--text3)';}
+
+  try{
+    emailjs.init(cfg.key);
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='📨 Send Test Mail';}
+    if(status){status.textContent='❌ EmailJS init failed — check Public Key';status.style.color='var(--red)';}
+    toast('EmailJS init failed. Check your Public Key.','var(--red)');
+    return;
+  }
+  const fakeTask={assignee:testEmail,title:'Test Task — POLYPLASTICS Task Manager',desc:'This is a test email from POLYPLASTICS Task Manager. If you received this, your email integration is working correctly!',token:'test123',due:today(),priority:'Medium',status:'In Progress',reminder:'daily'};
+  const ok=await sendTaskEmail(fakeTask,'test');
+  if(btn){btn.disabled=false;btn.textContent='📨 Send Test Mail';}
   if(ok){
-    if(status){status.textContent='✅ Test email sent to '+testEmail+'!';status.style.color='var(--green)';}
-  } else {
-    if(status){status.textContent='⚠ Auto-send not configured — mail client opened as fallback.';status.style.color='var(--amber)';}
+    toast('✅ Test email sent to '+testEmail+'!');
+    if(status){status.textContent='✅ Sent successfully to '+testEmail;status.style.color='var(--green)';}
+  }else{
+    toast('Failed to send. Check console for details.','var(--red)');
+    if(status){status.textContent='❌ Send failed — open browser console (F12) for error details';status.style.color='var(--red)';}
   }
 }
 
@@ -2188,7 +2143,18 @@ function handleLogout(){
 function sendMailtoEmail(taskId){
   const t=getTask(taskId);
   if(!t){toast('Task not found','var(--red)');return;}
-  sendAutoEmail(t, 'assigned');
+  const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(t.assignee);
+  const cfg=getEmailConfig();
+  // Try EmailJS first if configured
+  if(cfg.service&&cfg.template&&cfg.key){
+    sendTaskEmail(t,'assigned').then(ok=>{
+      if(ok) toast('📧 Email sent via EmailJS to '+t.assignee+'!');
+      else openMailtoFallback(t,taskLink);
+    });
+    return;
+  }
+  // Fallback: open mail client
+  openMailtoFallback(t, taskLink, 'assigned');
 }
 
 function openMailtoFallback(t, taskLink, reason, changeDetail){
@@ -2201,7 +2167,6 @@ function openMailtoFallback(t, taskLink, reason, changeDetail){
     priority_change: '[POLYPLASTICS] Priority Changed: '+t.title,
     status_change:   '[POLYPLASTICS] Status Changed: '+t.title,
     reminder:        '[POLYPLASTICS] Reminder: '+t.title,
-    test:            '[POLYPLASTICS] Test Email from Task Manager',
   };
   const introMap={
     assigned:        'A task has been assigned to you.',
@@ -2210,9 +2175,7 @@ function openMailtoFallback(t, taskLink, reason, changeDetail){
     priority_change: 'The priority of your task has been changed.',
     status_change:   'The status of your task has been changed.',
     reminder:        'This is a reminder about your pending task.',
-    test:            'This is a test email from POLYPLASTICS Task Manager.',
   };
-  const fromMail = getRegisteredMailId();
   const subject=encodeURIComponent(subjectMap[reason]||subjectMap.assigned);
   const changeBlock=changeDetail?'🔄 Change:     '+changeDetail+'\n':'';
   const body=encodeURIComponent(
@@ -2232,26 +2195,28 @@ ${t.desc?'📝 Description:\n'+t.desc+'\n\n':''}
 ${taskLink}
 
 Regards,
-POLYPLASTICS Task Manager${fromMail?'\nSent from: '+fromMail:''}`
+POLYPLASTICS Task Manager`
   );
-  // Use registered from-mail as the sender if configured, otherwise plain mailto
-  const toAddr = t.assignee + (fromMail ? '?from=' + encodeURIComponent(fromMail) + '&' : '?') + 'subject=' + subject + '&body=' + body;
-  window.open('mailto:' + toAddr);
+  window.open('mailto:'+t.assignee+'?subject='+subject+'&body='+body);
   toast('📧 Mail client opened for '+t.assignee);
 }
 
 async function sendAllReminders(){
+  const cfg=getEmailConfig();
+  if(!cfg.service||!cfg.template||!cfg.key){
+    toast('Configure EmailJS in Settings first','var(--amber)');
+    return;
+  }
   const active=tasks.filter(t=>t.reminder&&t.reminder!=='none'&&t.status!=='Done');
   if(!active.length){toast('No active reminders to send','var(--amber)');return;}
-  const key = getW3FKey();
-  toast((key?'📧 Sending ':'📧 Opening mail client for ')+active.length+' reminder(s)…','var(--accent)');
-  let sent=0;
+  toast('Sending '+active.length+' reminder emails…','var(--accent)');
+  let sent=0,failed=0;
   for(const t of active){
-    await sendAutoEmail(t,'reminder');
-    sent++;
-    await new Promise(r=>setTimeout(r,key?300:700));
+    const ok=await sendTaskEmail(t,'reminder');
+    if(ok) sent++; else failed++;
   }
-  toast('✅ '+(key?'Sent':'Opened')+' '+sent+' reminder email'+(sent!==1?'s':'')+'!');
+  if(failed===0) toast(`✅ All ${sent} reminder emails sent!`);
+  else toast(`Sent ${sent}/${active.length} emails. ${failed} failed — check console.`,'var(--amber)');
 }
 
 function exportData(){
@@ -2423,9 +2388,17 @@ function openUserTaskDetail(id){
 function sendUserTaskEmail(taskId){
   const t=tasks.find(x=>x.id===taskId);
   if(!t){toast('Task not found','var(--red)');return;}
+  const cfg=getEmailConfig();
   const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(t.assignee);
+  // Try EmailJS if configured
+  if(cfg.service&&cfg.template&&cfg.key){
+    sendTaskEmail(t,'reminder').then(ok=>{
+      if(ok) toast('📧 Task details emailed to '+t.assignee+'!');
+      else openUserMailtoFallback(t,taskLink);
+    });
+    return;
+  }
   openUserMailtoFallback(t,taskLink);
-  toast('📧 Mail client opened for '+t.assignee);
 }
 
 function openUserMailtoFallback(t,taskLink){
@@ -2849,12 +2822,23 @@ function saveTask(){
     tasks=[nt,...tasks];
     localStorage.setItem('tf_tasks',JSON.stringify(tasks));
     if(_fbReady&&_db) _db.collection('tasks').doc(nt.id).set(nt).catch(e=>console.warn('addTask error',e));
-    // Close modal and refresh UI FIRST — then send email
-    closeTaskModal(); refreshOverdueBadge();
-    showPanel(currentPanel);
-    // Send email notification
-    sendAutoEmail(nt, 'assigned');
-    return;
+    const cfg=getEmailConfig();
+    if(cfg.service&&cfg.template&&cfg.key){
+      // EmailJS configured — send automatically
+      sendTaskEmail(nt,'assigned').then(ok=>{
+        if(ok) toast('✅ Task created & email sent to '+assignee+'!');
+        else {
+          toast('Task created! Opening mail client…','var(--amber)');
+          const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
+          openMailtoFallback(nt,taskLink);
+        }
+      });
+    } else {
+      // No EmailJS — automatically open mailto (pre-filled email) right away
+      toast('Task created! Opening mail client for '+assignee+'…','var(--accent)');
+      const taskLink=window.location.href.split('?')[0]+'?email='+encodeURIComponent(nt.assignee);
+      openMailtoFallback(nt,taskLink);
+    }
   }
   closeTaskModal(); refreshOverdueBadge();
   showPanel(currentPanel);
@@ -3722,29 +3706,34 @@ function exportPDF(){
 }
 
 
-// ── Reply notification email to admin (via registered mail ID / mailto) ─
+// ── Reply notification email to admin ────────────────────────────────
 async function sendReplyNotificationEmail(task, reply){
+  const cfg = getEmailConfig();
+  if(!cfg.service||!cfg.template||!cfg.key) return;
   const adminEmail = localStorage.getItem('admin_notify_email') || '';
   if(!adminEmail) return;
-  const fromMail = getRegisteredMailId();
+  emailjs.init(cfg.key);
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
-  const subject = encodeURIComponent('[POLYPLASTICS] New Reply on: ' + task.title);
-  const body = encodeURIComponent(
-'Hi Admin,\n\n' +
-'💬 ' + reply.author + ' replied on task: ' + task.title + '\n\n' +
-'Reply:\n' + (reply.text||'(attachment)') + '\n\n' +
-'━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-'📌 Task:     ' + task.title + '\n' +
-'📅 Due:      ' + fmt(task.due) + '\n' +
-'⚡ Priority: ' + task.priority + '\n' +
-'📊 Status:   ' + task.status + '\n' +
-'━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-'🔗 View task: ' + taskLink + '\n\n' +
-'Regards,\nPOLYPLASTICS Task Manager' + (fromMail ? '\nSent from: ' + fromMail : '')
-  );
-  const toAddr = adminEmail + (fromMail ? '?from=' + encodeURIComponent(fromMail) + '&' : '?') + 'subject=' + subject + '&body=' + body;
-  window.open('mailto:' + toAddr);
-  console.log('Reply notification mailto opened for admin');
+  try{
+    await emailjs.send(cfg.service, cfg.template, {
+      to_email:      adminEmail,
+      to_name:       'Admin',
+      task_title:    task.title,
+      task_desc:     '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)'),
+      task_link:     taskLink,
+      due_date:      fmt(task.due),
+      priority:      task.priority,
+      status:        task.status,
+      reminder:      '',
+      reason:        'reply',
+      reason_label:  'New Reply on Task',
+      change_detail: reply.author + ' replied: ' + (reply.text||'').slice(0,120),
+      from_name:     'POLYPLASTICS Task Manager'
+    });
+    console.log('Reply notification email sent to admin');
+  }catch(e){
+    console.warn('Reply notification email failed', e);
+  }
 }
 
 </script>
