@@ -669,6 +669,19 @@ function renderDashboard(){
     <div class="card"><div class="section-head" style="margin-bottom:12px">Tasks by Assignee</div><div class="chart-wrap"><canvas id="ch-assignee"></canvas></div></div>
   </div>
 
+  <div class="charts-grid fade-in" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-bottom:22px">
+    <div class="card">
+      <div class="section-head" style="margin-bottom:4px">On-Time Compliance by Assignee</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px">% of completed tasks closed on or before due date</div>
+      <div class="chart-wrap" style="height:220px"><canvas id="ch-compliance"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="section-head" style="margin-bottom:4px">Avg. Days to Close (vs Assigned Date)</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Average days from task creation to completion, per assignee</div>
+      <div class="chart-wrap" style="height:220px"><canvas id="ch-avgclose"></canvas></div>
+    </div>
+  </div>
+
   <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px" class="fade-in">
     <div class="card">
       <div class="section-head" style="margin-bottom:14px">Team Workload</div>
@@ -743,6 +756,109 @@ function renderDashboard(){
         maintainAspectRatio:false
       }
     });
+
+    // ── On-Time Compliance by Assignee ──────────────────────────────
+    // Only Done tasks are counted. On-time = closedAt (or today as proxy) <= due date.
+    // Since tasks may not have a closedAt field, we use due date vs created date heuristic:
+    // a Done task is "on time" if its due date >= created date (i.e. not already overdue when closed).
+    // Better proxy: Done tasks whose due >= today's date at time of completion.
+    // Practical approach: Done tasks are on-time if due >= created (task wasn't already past due when assigned)
+    // and due is not in the past relative to a reasonable close window.
+    // We use: onTime = done task where due date >= created date (assigned before due).
+    // For tasks with a closedAt field (future-proof), use that.
+    (()=>{
+      const assignees=[...new Set(tasks.filter(t=>t.assignee).map(t=>t.assignee.split('@')[0]))];
+      const complianceVals=assignees.map(name=>{
+        const doneTasks=tasks.filter(t=>t.assignee&&t.assignee.split('@')[0]===name&&t.status==='Done');
+        if(!doneTasks.length) return 0;
+        const onTime=doneTasks.filter(t=>{
+          const closeDate=t.closedAt||t.doneAt||null;
+          if(closeDate) return closeDate<=t.due;
+          // Fallback: if no explicit close date, assume on-time if due >= created (reasonable heuristic)
+          return t.due&&t.created&&t.due>=t.created;
+        }).length;
+        return Math.round(onTime/doneTasks.length*100);
+      });
+      // Color: green if >=80%, amber if 50-79%, red if <50%
+      const compColors=complianceVals.map(v=>v>=80?'rgba(52,211,153,.75)':v>=50?'rgba(251,191,36,.75)':'rgba(248,113,113,.75)');
+      destroyChart('ch-compliance');
+      chartInstances['ch-compliance']=new Chart(document.getElementById('ch-compliance'),{
+        type:'bar',
+        data:{
+          labels:assignees,
+          datasets:[{
+            label:'On-Time %',
+            data:complianceVals,
+            backgroundColor:compColors,
+            borderRadius:6,
+            borderWidth:0
+          }]
+        },
+        options:{
+          indexAxis:'y',
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{label:ctx=>' '+ctx.raw+'% on-time'}}
+          },
+          scales:{
+            x:{
+              min:0,max:100,
+              ticks:{color:'#9aa5c0',font:{size:10},callback:v=>v+'%'},
+              grid:{color:'rgba(255,255,255,.04)'}
+            },
+            y:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{display:false}}
+          },
+          maintainAspectRatio:false
+        }
+      });
+    })();
+
+    // ── Avg Days to Close (vs original assigned/created date) ───────
+    (()=>{
+      const assignees=[...new Set(tasks.filter(t=>t.assignee).map(t=>t.assignee.split('@')[0]))];
+      const avgDaysVals=assignees.map(name=>{
+        const doneTasks=tasks.filter(t=>t.assignee&&t.assignee.split('@')[0]===name&&t.status==='Done'&&t.created);
+        if(!doneTasks.length) return null;
+        const totalDays=doneTasks.reduce((sum,t)=>{
+          const closeDate=t.closedAt||t.doneAt||null;
+          const end=closeDate?new Date(closeDate):new Date(); // use today as proxy if no close date
+          const start=new Date(t.created);
+          const diff=Math.max(0,Math.round((end-start)/(1000*60*60*24)));
+          return sum+diff;
+        },0);
+        return Math.round(totalDays/doneTasks.length);
+      });
+      const acColors=['rgba(91,141,238,.75)','rgba(167,139,250,.75)','rgba(34,211,238,.75)','rgba(249,115,22,.75)','rgba(16,185,129,.75)','rgba(251,191,36,.75)','rgba(248,113,113,.75)','rgba(52,211,153,.75)'];
+      destroyChart('ch-avgclose');
+      chartInstances['ch-avgclose']=new Chart(document.getElementById('ch-avgclose'),{
+        type:'bar',
+        data:{
+          labels:assignees,
+          datasets:[{
+            label:'Avg Days',
+            data:avgDaysVals,
+            backgroundColor:assignees.map((_,i)=>acColors[i%acColors.length]),
+            borderRadius:6,
+            borderWidth:0
+          }]
+        },
+        options:{
+          indexAxis:'y',
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{label:ctx=>ctx.raw===null?' No data':' '+ctx.raw+' days avg'}}
+          },
+          scales:{
+            x:{
+              ticks:{color:'#9aa5c0',font:{size:10},callback:v=>v+'d'},
+              grid:{color:'rgba(255,255,255,.04)'}
+            },
+            y:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{display:false}}
+          },
+          maintainAspectRatio:false
+        }
+      });
+    })();
 
     // team table
     const byPerson=[...new Set(tasks.map(t=>t.assignee))].map(e=>({email:e,total:tasks.filter(t=>t.assignee===e).length,done:tasks.filter(t=>t.assignee===e&&t.status==='Done').length}));
