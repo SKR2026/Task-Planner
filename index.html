@@ -528,7 +528,7 @@ function saveTasks() {
   localStorage.setItem('tf_tasks', JSON.stringify(tasks));
   if (_fbReady && _db) {
     const batch = _db.batch();
-    tasks.forEach(t => batch.set(_db.collection('tasks').doc(t.id), t));
+    tasks.forEach(t => { const tc=Object.fromEntries(Object.entries(t).filter(([,v])=>v!==undefined)); batch.set(_db.collection('tasks').doc(tc.id), tc); });
     // Delete removed tasks: get all Firestore IDs and remove ones not in tasks
     _db.collection('tasks').get().then(snap => {
       const localIds = new Set(tasks.map(t => t.id));
@@ -542,7 +542,8 @@ function updateTask(t) {
   tasks = tasks.map(x=>x.id===t.id?t:x);
   localStorage.setItem('tf_tasks', JSON.stringify(tasks));
   if (_fbReady && _db) {
-    _db.collection('tasks').doc(t.id).set(t).catch(e => console.warn('updateTask error:', e));
+    const tClean = Object.fromEntries(Object.entries(t).filter(([,v])=>v!==undefined));
+    _db.collection('tasks').doc(tClean.id).set(tClean).catch(e => console.warn('updateTask error:', e));
   }
 }
 
@@ -2817,6 +2818,7 @@ function saveTask(){
 
     if(editTaskId){
       const t=getTask(editTaskId);
+      if(!t){ toast('Task not found — it may have been deleted.','var(--red)'); closeTaskModal(); return; }
       const newPriority=document.getElementById('tm-priority').value;
       const newStatus=document.getElementById('tm-status').value;
       const updated={...t,title,desc:document.getElementById('tm-desc').value,assignee,priority:newPriority,status:newStatus,due,reminder:document.getElementById('tm-reminder').value,tags};
@@ -2845,11 +2847,13 @@ function saveTask(){
         replies:[], attachments:[],
         reminder:document.getElementById('tm-reminder').value,
         tags,
-        plant: plantOwnerAuthenticated&&currentPlantSession ? currentPlantSession.id : undefined
+        ...(plantOwnerAuthenticated&&currentPlantSession ? {plant: currentPlantSession.id} : {})
       };
       tasks=[nt,...tasks];
       localStorage.setItem('tf_tasks',JSON.stringify(tasks));
-      if(_fbReady&&_db) _db.collection('tasks').doc(nt.id).set(nt).catch(e=>console.warn('addTask error',e));
+      // Strip undefined fields before sending to Firestore (Firestore rejects undefined)
+      const ntClean = Object.fromEntries(Object.entries(nt).filter(([,v])=>v!==undefined));
+      if(_fbReady&&_db) _db.collection('tasks').doc(ntClean.id).set(ntClean).catch(e=>console.warn('addTask error',e));
 
       // Close modal & refresh UI immediately — before async email
       closeTaskModal(); refreshOverdueBadge(); showPanel(currentPanel);
