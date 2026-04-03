@@ -2332,6 +2332,8 @@ function adminLogin(){
     document.getElementById('btn-admin-mode').style.display = '';
     document.getElementById('btn-user-mode').style.display = '';
     document.getElementById('btn-export').style.display = 'flex';
+    document.getElementById('btn-new-task').style.display = 'flex';
+    document.getElementById('btn-bulk-upload').style.display = 'flex';
     const sidebarBottom = document.querySelector('.sidebar-bottom');
     if(sidebarBottom){ sidebarBottom.style.display = ''; sidebarBottom.style.visibility = ''; }
     toast('Welcome back, Admin! 👋');
@@ -2922,7 +2924,7 @@ function changeAdminPassword(){
   const current=document.getElementById('pwd-current').value;
   const newPwd=document.getElementById('pwd-new').value;
   const confirm=document.getElementById('pwd-confirm').value;
-  const stored=localStorage.getItem('admin_password')||'';
+  const stored=localStorage.getItem('admin_password')||DEFAULT_ADMIN_PASSWORD;
   const statusEl=document.getElementById('pwd-status');
   if(current!==stored){statusEl.style.color='var(--red)';statusEl.textContent='❌ Current password is incorrect';return;}
   if(newPwd.length<6){statusEl.style.color='var(--red)';statusEl.textContent='❌ New password must be at least 6 characters';return;}
@@ -3687,6 +3689,8 @@ if(mode !== 'user'){
     document.getElementById('btn-admin-mode').style.display = '';
     document.getElementById('btn-user-mode').style.display = '';
     document.getElementById('btn-export').style.display = 'flex';
+    document.getElementById('btn-new-task').style.display = 'flex';
+    document.getElementById('btn-bulk-upload').style.display = 'flex';
     const sb = document.querySelector('.sidebar-bottom');
     if(sb){ sb.style.display=''; sb.style.visibility=''; }
     showPanel('dashboard');
