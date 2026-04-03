@@ -978,11 +978,11 @@ function renderPlantPanel(){
   <div class="panel-sub">Owner: <strong style="color:var(--accent)">${esc((plant.owners||[]).join(', ')||'—')}</strong> &nbsp;·&nbsp; ${total} tasks</div>
 
   <div class="stats-grid fade-in">
-    <div class="stat-card" style="--c:var(--accent)"><div class="stat-icon">📋</div><div class="stat-value">${total}</div><div class="stat-label">Total Tasks</div></div>
-    <div class="stat-card" style="--c:var(--purple)"><div class="stat-icon">⚡</div><div class="stat-value">${inprog}</div><div class="stat-label">In Progress</div></div>
-    <div class="stat-card" style="--c:var(--green)"><div class="stat-icon">✅</div><div class="stat-value">${done}</div><div class="stat-label">Completed</div></div>
-    <div class="stat-card" style="--c:var(--red)"><div class="stat-icon">🚨</div><div class="stat-value">${overdue}</div><div class="stat-label">Overdue</div></div>
-    <div class="stat-card" style="--c:var(--cyan)"><div class="stat-icon">📈</div><div class="stat-value">${rate}%</div><div class="stat-label">Completion Rate</div></div>
+    <div class="stat-card" style="--c:var(--accent);cursor:pointer;" onclick="renderPlantTaskRows('All')" title="View all tasks"><div class="stat-icon">📋</div><div class="stat-value">${total}</div><div class="stat-label">Total Tasks</div></div>
+    <div class="stat-card" style="--c:var(--purple);cursor:pointer;" onclick="renderPlantTaskRows('In Progress')" title="View In Progress tasks"><div class="stat-icon">⚡</div><div class="stat-value">${inprog}</div><div class="stat-label">In Progress</div></div>
+    <div class="stat-card" style="--c:var(--green);cursor:pointer;" onclick="renderPlantTaskRows('Done')" title="View completed tasks"><div class="stat-icon">✅</div><div class="stat-value">${done}</div><div class="stat-label">Completed</div></div>
+    <div class="stat-card" style="--c:var(--red);cursor:pointer;" onclick="renderPlantTaskRows('overdue')" title="View overdue tasks"><div class="stat-icon">🚨</div><div class="stat-value">${overdue}</div><div class="stat-label">Overdue</div></div>
+    <div class="stat-card" style="--c:var(--cyan);cursor:pointer;" onclick="renderPlantTaskRows('All')" title="View all tasks"><div class="stat-icon">📈</div><div class="stat-value">${rate}%</div><div class="stat-label">Completion Rate</div></div>
   </div>
 
   <div class="charts-grid fade-in" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:22px">
@@ -997,7 +997,10 @@ function renderPlantPanel(){
   </div>
 
   <div class="card fade-in">
-    <div class="section-head" style="margin-bottom:14px">Tasks for this Plant</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <div class="section-head" style="margin-bottom:0">Tasks for this Plant &nbsp;<span id="plant-task-filter-label" style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:10px;background:rgba(91,141,238,.12);color:var(--accent);letter-spacing:.4px;vertical-align:middle">All</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="renderPlantTaskRows('All')" style="font-size:11px;">Show All</button>
+    </div>
     <div id="plant-task-rows"></div>
   </div>`;
 
@@ -1017,24 +1020,77 @@ function renderPlantPanel(){
       options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}
     });
     // task list
-    const tRows=document.getElementById('plant-task-rows');
-    if(!plantTasks.length){tRows.innerHTML='<div class="empty"><div class="empty-icon">🌿</div><div>No tasks found for this plant</div></div>';return;}
-    tRows.innerHTML=plantTasks.map(t=>`
-      <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openDrawer('${t.id}')">
-        <div class="task-row-body">
-          <div class="task-title">${esc(t.title)}</div>
-          <div class="task-meta">
-            <span>👤 ${esc(t.assignee)}</span>
-            <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
-          </div>
-        </div>
-        <div class="task-actions" onclick="event.stopPropagation()">
-          <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
-          <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
-          ${isOverdue(t)?'<span class="badge badge-overdue">Overdue</span>':''}
-        </div>
-      </div>`).join('');
+    renderPlantTaskRows('All');
   },50);
+}
+
+// ── Render filtered task rows inside the plant panel ─────────────────
+function renderPlantTaskRows(filter){
+  const groups=getPlantGroups();
+  const plant=groups.find(p=>p.id===_activePlantId);
+  if(!plant) return;
+  const owners=(plant.owners||[]).map(o=>o.toLowerCase());
+  const plantTasks=tasks.filter(t=>owners.includes((t.assignee||'').toLowerCase())||(t.plant&&t.plant===plant.id));
+
+  let filtered;
+  let labelText;
+  if(filter==='overdue'){
+    filtered=plantTasks.filter(isOverdue);
+    labelText='Overdue';
+  } else if(filter==='All'){
+    filtered=plantTasks;
+    labelText='All';
+  } else {
+    filtered=plantTasks.filter(t=>t.status===filter);
+    labelText=filter;
+  }
+
+  // Update pill label
+  const lbl=document.getElementById('plant-task-filter-label');
+  const pillColors={
+    'All':'rgba(91,141,238,.12)',
+    'In Progress':'rgba(91,141,238,.15)',
+    'Done':'rgba(52,211,153,.13)',
+    'Review':'rgba(167,139,250,.15)',
+    'To Do':'rgba(156,163,176,.1)',
+    'Overdue':'rgba(248,113,113,.2)'
+  };
+  const pillText={
+    'All':'var(--accent)',
+    'In Progress':'var(--accent)',
+    'Done':'var(--green)',
+    'Review':'var(--purple)',
+    'To Do':'var(--text3)',
+    'Overdue':'var(--red)'
+  };
+  if(lbl){
+    lbl.textContent=labelText;
+    lbl.style.background=pillColors[labelText]||pillColors['All'];
+    lbl.style.color=pillText[labelText]||pillText['All'];
+  }
+
+  const tRows=document.getElementById('plant-task-rows');
+  if(!tRows) return;
+  if(!filtered.length){
+    tRows.innerHTML='<div class="empty"><div class="empty-icon">🌿</div><div>No tasks match this filter</div></div>';
+    return;
+  }
+  tRows.innerHTML=filtered.map(t=>`
+    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openDrawer('${t.id}')">
+      <div class="task-row-body">
+        <div class="task-title">${esc(t.title)}</div>
+        <div class="task-meta">
+          <span>👤 ${esc(t.assignee)}</span>
+          <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
+          ${isOverdue(t)?'<span style="color:var(--red);font-weight:600">Overdue</span>':''}
+        </div>
+      </div>
+      <div class="task-actions" onclick="event.stopPropagation()">
+        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
+        <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
+        ${isOverdue(t)?'<span class="badge badge-overdue">Overdue</span>':''}
+      </div>
+    </div>`).join('');
 }
 
 // ── Dashboard plant performance grid ─────────────────────────────────
