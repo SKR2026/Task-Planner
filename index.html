@@ -383,7 +383,16 @@
 const uid = () => Math.random().toString(36).slice(2,9);
 const today = () => new Date().toISOString().slice(0,10);
 const tomorrow = () => { const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); };
-const fmt = d => new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+const fmt = d => {
+  if(!d) return '—';
+  // For YYYY-MM-DD strings, parse directly (avoids timezone shifts)
+  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[3]+'-'+m[2]+'-'+m[1];
+  // For ISO timestamp strings (e.g. created field)
+  const dt = new Date(d);
+  if(isNaN(dt)) return d;
+  return String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+dt.getFullYear();
+};
 const fmtTime = d => new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
 const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
@@ -3319,7 +3328,7 @@ function validateBulkRow(row, rowNum){
   if(!title)    return `Row ${rowNum}: Missing "title"`;
   if(!assignee) return `Row ${rowNum}: Missing "assignee" email`;
   if(!due)      return `Row ${rowNum}: Missing "due" date`;
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(due)) return `Row ${rowNum}: "due" must be YYYY-MM-DD format (got: ${due})`;
+  if(!/^\d{2}-\d{2}-\d{4}$/.test(due)) return `Row ${rowNum}: "due" must be DD-MM-YYYY format (got: ${due})`;
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignee)) return `Row ${rowNum}: Invalid email "${assignee}"`;
   return null;
 }
@@ -3340,7 +3349,7 @@ function buildBulkTask(row){
     assignee: (row.assignee||row.email||row.assigned_to||'').trim(),
     priority: prio,
     status: status,
-    due: (row.due||row.due_date||row.deadline||'').trim(),
+    due: (()=>{ const raw=(row.due||row.due_date||row.deadline||'').trim(); const dm=raw.match(/^(\d{2})-(\d{2})-(\d{4})$/); return dm?dm[3]+'-'+dm[2]+'-'+dm[1]:raw; })(),
     created: today(),
     token: uid(),
     replies: [],
@@ -3722,7 +3731,7 @@ function exportPDF(){
       <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">
         <span style="background:${statusColor[t.status]||'#ccc'}22;color:${statusColor[t.status]||'#555'};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">${t.status||''}</span>
       </td>
-      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${t.due||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${fmt(t.due)||'—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${(Array.isArray(t.tags)?t.tags.join(', '):(t.tags||''))}</td>
     </tr>`).join('');
 
