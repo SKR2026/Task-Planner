@@ -3477,7 +3477,7 @@ if(mode !== 'user'){
       </div>`;
   } else {
     // No URL params — auto-authenticate and show dashboard
-    adminAuthenticated = true;
+    showAdminLoginScreen();
     document.getElementById('admin-nav').style.display = 'block';
     document.getElementById('btn-admin-mode').style.display = '';
     document.getElementById('btn-user-mode').style.display = '';
