@@ -3476,8 +3476,15 @@ if(mode !== 'user'){
         </div>
       </div>`;
   } else {
-    // No URL params — always require admin login (never auto-authenticate)
-    showAdminLoginScreen();
+    // No URL params — auto-authenticate and show dashboard
+    adminAuthenticated = true;
+    document.getElementById('admin-nav').style.display = 'block';
+    document.getElementById('btn-admin-mode').style.display = '';
+    document.getElementById('btn-user-mode').style.display = '';
+    document.getElementById('btn-export').style.display = 'flex';
+    const sb = document.querySelector('.sidebar-bottom');
+    if(sb){ sb.style.display=''; sb.style.visibility=''; }
+    showPanel('dashboard');
   }
 } else {
   // ── Valid assignee link (?token= or ?email=) ──────────────────────
