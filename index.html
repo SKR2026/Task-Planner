@@ -3476,7 +3476,7 @@ if(mode !== 'user'){
         </div>
       </div>`;
   } else {
-    // No URL params — require admin authentication before showing dashboard
+    // No URL params — always require admin login (never auto-authenticate)
     showAdminLoginScreen();
   }
 } else {
