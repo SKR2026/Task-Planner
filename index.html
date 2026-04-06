@@ -626,6 +626,8 @@ function setMode(m){
 //  PANEL ROUTER
 // ═══════════════════════════════════════════════════════════════════════
 function showPanel(name){
+  // SECURITY: If admin overlay is still up, block navigation
+  if(document.getElementById('admin-pwd-overlay')) return;
   // SECURITY: If in user mode, only the 'user' panel is allowed.
   if(mode==='user' && name!=='user'){ name='user'; }
   // SECURITY: If in plant owner mode, only plant-related panels are allowed.
@@ -2120,6 +2122,86 @@ function getScopedTasks(){
   );
 }
 
+function showAdminPasswordOverlay(){
+  // Remove any existing overlay
+  const existing = document.getElementById('admin-pwd-overlay');
+  if(existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'admin-pwd-overlay';
+  overlay.style.cssText = [
+    'position:fixed','inset:0','z-index:9999',
+    'background:rgba(8,9,13,0.82)',
+    'backdrop-filter:blur(6px)',
+    '-webkit-backdrop-filter:blur(6px)',
+    'display:flex','align-items:center','justify-content:center',
+    'padding:20px'
+  ].join(';');
+
+  overlay.innerHTML = `
+    <div style="
+      background:var(--surface);
+      border:1px solid var(--border2);
+      border-radius:var(--radius-lg);
+      padding:36px 32px;
+      width:100%;max-width:400px;
+      box-shadow:0 24px 64px rgba(0,0,0,.6);
+      animation:slideUp .2s ease;
+      text-align:center;
+    ">
+      <div style="font-size:48px;margin-bottom:14px">🔐</div>
+      <div style="font-family:var(--font-head);font-weight:800;font-size:20px;color:var(--text);margin-bottom:6px">Admin Access</div>
+      <div style="color:var(--text3);font-size:13px;margin-bottom:24px">Enter your password to continue</div>
+      <div style="text-align:left;margin-bottom:12px">
+        <label class="form-label">Password</label>
+        <input id="overlay-pwd-input" class="form-input" type="password"
+          placeholder="Enter admin password"
+          onkeydown="if(event.key==='Enter')overlayAdminLogin()"
+          style="font-size:15px;padding:12px 14px;"
+        />
+      </div>
+      <div id="overlay-login-error" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none">❌ Incorrect password. Try again.</div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center;font-size:15px;padding:12px 20px;margin-bottom:10px" onclick="overlayAdminLogin()">
+        🔓 Login
+      </button>
+      <div style="text-align:center;font-size:12px;color:var(--text3);margin:8px 0">— or —</div>
+      <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="document.getElementById('admin-pwd-overlay').remove();showPlantOwnerLoginScreen()">
+        🏭 Plant Owner Login
+      </button>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  setTimeout(()=>document.getElementById('overlay-pwd-input')?.focus(), 80);
+}
+
+function overlayAdminLogin(){
+  const entered = document.getElementById('overlay-pwd-input')?.value || '';
+  const err = document.getElementById('overlay-login-error');
+  const doLogin = (stored) => {
+    if(!stored || entered !== stored){
+      if(err){ err.style.display='block'; }
+      const inp = document.getElementById('overlay-pwd-input');
+      if(inp) inp.value='';
+      return;
+    }
+    if(err) err.style.display='none';
+    adminAuthenticated = true;
+    localStorage.setItem('admin_password', stored);
+    const overlay = document.getElementById('admin-pwd-overlay');
+    if(overlay) overlay.remove();
+    toast('Welcome back, Admin! 👋');
+    showPanel('dashboard');
+  };
+  if(_fbReady && _db){
+    _db.collection('settings').doc('admin').get().then(d=>{
+      const stored = (d.exists && d.data().password) ? d.data().password : localStorage.getItem('admin_password');
+      doLogin(stored);
+    }).catch(()=>doLogin(localStorage.getItem('admin_password')));
+  } else {
+    doLogin(localStorage.getItem('admin_password'));
+  }
+}
+
 function adminLogin(){
   const entered = document.getElementById('admin-pwd-input').value;
   const err = document.getElementById('admin-login-error');
@@ -3520,8 +3602,15 @@ if(mode !== 'user'){
         </div>
       </div>`;
   } else {
-    // No URL params — require admin password before showing dashboard
-    showAdminLoginScreen();
+    // No URL params — render full UI (sidebar stays intact) then
+    // gate access behind a full-screen password overlay.
+    document.getElementById('admin-nav').style.display = 'block';
+    document.getElementById('btn-admin-mode').style.display = '';
+    document.getElementById('btn-user-mode').style.display = '';
+    document.getElementById('btn-export').style.display = 'flex';
+    const sb = document.querySelector('.sidebar-bottom');
+    if(sb){ sb.style.display=''; sb.style.visibility=''; }
+    showAdminPasswordOverlay();
   }
 } else {
   // ── Valid assignee link (?token= or ?email=) ──────────────────────
