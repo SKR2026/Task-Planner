@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root {
     --bg:        #08090d;
@@ -446,6 +447,9 @@ let _unsubscribeTasks = null;
             if(s.tenantId)         localStorage.setItem('ms_tenant_id',s.tenantId);
             if(s.testEmail)        localStorage.setItem('ms_test_email',s.testEmail);
             if(s.adminNotifyEmail) localStorage.setItem('admin_notify_email',s.adminNotifyEmail);
+            if(s.ejsService)       localStorage.setItem('ejs_service_id',s.ejsService);
+            if(s.ejsTemplate)      localStorage.setItem('ejs_template_id',s.ejsTemplate);
+            if(s.ejsKey)           localStorage.setItem('ejs_public_key',s.ejsKey);
           }
         }).catch(()=>{});
         _db.collection('settings').doc('plantGroups').get().then(d=>{
@@ -1482,42 +1486,73 @@ function renderSettings(){
     </div>
 
     <div class="card">
-      <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">📧 Email Integration (Microsoft Graph)</div>
+      <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">📧 Email Integration</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:16px">
-        Configure Microsoft Graph API to send automatic task assignment and reminder emails using your Microsoft 365 / Outlook account.
-        ${(localStorage.getItem('ms_client_id')&&localStorage.getItem('ms_tenant_id'))
-          ?'<span style="color:var(--green);font-weight:600;margin-left:8px">✅ Configured — emails will send automatically</span>'
-          :'<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ Not configured — using mailto fallback</span>'}
+        Configure an email provider for automatic notifications. Set up <strong>either</strong> Microsoft Graph <em>or</em> EmailJS.
+        ${(()=>{const t=emailTransport();return t==='msgraph'?'<span style="color:var(--green);font-weight:600;margin-left:8px">✅ Microsoft Graph active</span>':t==='emailjs'?'<span style="color:var(--green);font-weight:600;margin-left:8px">✅ EmailJS active</span>':'<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ Not configured — using mailto fallback</span>'})()}
       </div>
 
-      <!-- Step by step guide -->
-      <div style="background:rgba(91,141,238,.05);border:1px dashed rgba(91,141,238,.25);border-radius:var(--radius);padding:16px;margin-bottom:18px;font-size:12px;line-height:2;color:var(--text2)">
-        <div style="font-weight:700;color:var(--accent);margin-bottom:8px;font-size:13px">📋 Microsoft Graph Setup (Azure AD App Registration)</div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">1</span>Go to <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" style="color:var(--accent)" target="_blank">portal.azure.com</a> → <strong>App registrations</strong> → New registration</div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">2</span>Set <strong>Redirect URI</strong> → <em>Single-page application (SPA)</em> → paste this page's URL</div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">3</span>Copy the <code style="background:var(--card);padding:1px 6px;border-radius:3px">Application (client) ID</code> and <code style="background:var(--card);padding:1px 6px;border-radius:3px">Directory (tenant) ID</code></div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">4</span>Go to <strong>API permissions</strong> → Add → Microsoft Graph → Delegated → <code style="background:var(--card);padding:1px 6px;border-radius:3px">Mail.Send</code> → Grant admin consent</div>
-        <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">5</span>Paste Client ID &amp; Tenant ID below → Save → Send test email. A Microsoft sign-in popup will appear on first use ✅</div>
-        <div style="margin-top:8px;padding:8px;background:var(--card);border-radius:6px;font-size:11px;color:var(--text3)">
-          <strong style="color:var(--amber)">Note:</strong> Emails are sent <em>from</em> the signed-in Microsoft 365 user's mailbox. The user must have an active M365 / Exchange Online licence with a mailbox.
+      <!-- Tab selector -->
+      <div style="display:flex;gap:0;margin-bottom:18px;border:1px solid var(--border2);border-radius:9px;overflow:hidden;max-width:420px">
+        <button id="email-tab-graph" onclick="switchEmailTab('graph')" style="flex:1;padding:9px;background:var(--accent);color:#fff;border:none;font-family:var(--font-body);font-size:12px;font-weight:600;cursor:pointer;">🔷 Microsoft Graph</button>
+        <button id="email-tab-ejs" onclick="switchEmailTab('ejs')" style="flex:1;padding:9px;background:transparent;color:var(--text2);border:none;font-family:var(--font-body);font-size:12px;font-weight:600;cursor:pointer;">📬 EmailJS (SMTP)</button>
+      </div>
+
+      <!-- Microsoft Graph pane -->
+      <div id="email-pane-graph">
+        <div style="background:rgba(91,141,238,.05);border:1px dashed rgba(91,141,238,.25);border-radius:var(--radius);padding:14px;margin-bottom:16px;font-size:12px;line-height:2;color:var(--text2)">
+          <div style="font-weight:700;color:var(--accent);margin-bottom:6px">📋 Azure AD Setup</div>
+          <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">1</span><a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" style="color:var(--accent)" target="_blank">portal.azure.com</a> → App registrations → New registration</div>
+          <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">2</span>Redirect URI → Single-page app (SPA) → paste this page URL</div>
+          <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">3</span>Copy <code style="background:var(--card);padding:1px 6px;border-radius:3px">Application (client) ID</code> and <code style="background:var(--card);padding:1px 6px;border-radius:3px">Directory (tenant) ID</code></div>
+          <div><span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">4</span>API permissions → Microsoft Graph → Delegated → <code style="background:var(--card);padding:1px 6px;border-radius:3px">Mail.Send</code> → Grant admin consent</div>
+          <div style="margin-top:6px;padding:7px 10px;background:var(--card);border-radius:6px;font-size:11px;color:var(--text3)"><strong style="color:var(--amber)">Note:</strong> Emails are sent from your signed-in Microsoft 365 mailbox.</div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Azure App Client ID</label>
+            <input class="form-input" id="ms-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('ms_client_id')||''}" /></div>
+          <div class="form-group"><label class="form-label">Tenant ID (or "common")</label>
+            <input class="form-input" id="ms-tenant-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('ms_tenant_id')||''}" /></div>
         </div>
       </div>
 
-      <div class="form-group"><label class="form-label">Admin Notify Email <span style="font-size:10px;color:var(--text3)">(receives task creation &amp; reply alerts)</span></label><input class="form-input" id="admin-notify-email" placeholder="admin@company.com" value="${localStorage.getItem('admin_notify_email')||''}" oninput="localStorage.setItem('admin_notify_email',this.value)"/></div>
-      <div class="form-group"><label class="form-label">Azure App Client ID</label><input class="form-input" id="ms-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('ms_client_id')||''}"/></div>
-      <div class="form-group"><label class="form-label">Azure Tenant ID <span style="font-size:10px;color:var(--text3)">(use <code>common</code> for multi-tenant)</span></label><input class="form-input" id="ms-tenant-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx or common" value="${localStorage.getItem('ms_tenant_id')||''}"/></div>
-      <div class="form-group"><label class="form-label">Test Email (Send To)</label><input class="form-input" id="ms-test-email" type="email" placeholder="your@email.com" value="${localStorage.getItem('ms_test_email')||''}"/></div>
+      <!-- EmailJS pane -->
+      <div id="email-pane-ejs" style="display:none">
+        <div style="background:rgba(52,211,153,.05);border:1px dashed rgba(52,211,153,.25);border-radius:var(--radius);padding:14px;margin-bottom:16px;font-size:12px;line-height:2;color:var(--text2)">
+          <div style="font-weight:700;color:var(--green);margin-bottom:6px">📬 EmailJS — works with Gmail, Outlook, any SMTP (free: 200 emails/month)</div>
+          <div><span style="background:var(--green);color:#000;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">1</span>Sign up free at <a href="https://www.emailjs.com" style="color:var(--green)" target="_blank">emailjs.com</a> → Dashboard → Add New Service (Gmail / Outlook / SMTP)</div>
+          <div><span style="background:var(--green);color:#000;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">2</span>Create a Template with <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{to_email}}</code>, <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{subject}}</code>, <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{message_html}}</code></div>
+          <div><span style="background:var(--green);color:#000;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:6px">3</span>Copy Service ID, Template ID, and Public Key → paste below → Save → Test ✅</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-group"><label class="form-label">Service ID</label>
+            <input class="form-input" id="ejs-service-id" placeholder="service_xxxxxxx" value="${localStorage.getItem('ejs_service_id')||''}" /></div>
+          <div class="form-group"><label class="form-label">Template ID</label>
+            <input class="form-input" id="ejs-template-id" placeholder="template_xxxxxxx" value="${localStorage.getItem('ejs_template_id')||''}" /></div>
+          <div class="form-group"><label class="form-label">Public Key</label>
+            <input class="form-input" id="ejs-public-key" placeholder="xxxxxxxxxxxxxxxxxxxx" value="${localStorage.getItem('ejs_public_key')||''}" /></div>
+        </div>
+      </div>
+
+      <!-- Common fields -->
+      <div class="form-row" style="margin-top:4px">
+        <div class="form-group"><label class="form-label">Admin Notify Email <span style="font-size:10px;color:var(--text3)">(gets task &amp; reply alerts)</span></label>
+          <input class="form-input" id="admin-notify-email" placeholder="admin@company.com" value="${localStorage.getItem('admin_notify_email')||''}" /></div>
+        <div class="form-group"><label class="form-label">Test Email (Send To)</label>
+          <input class="form-input" id="ms-test-email" type="email" placeholder="your@email.com" value="${localStorage.getItem('ms_test_email')||''}" /></div>
+      </div>
+
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
         <button class="btn btn-primary" onclick="saveEmailSettings()">💾 Save Settings</button>
         <button class="btn btn-success" id="test-mail-btn" onclick="sendTestMail()">📨 Send Test Email</button>
+        <button class="btn btn-ghost btn-sm" onclick="previewEmailTemplate()" title="Preview email template in a new tab">👁 Preview Template</button>
       </div>
       <div id="test-mail-status" style="font-size:12px;color:var(--text3);margin-bottom:12px;min-height:18px"></div>
 
       <div style="padding:12px;background:rgba(52,211,153,.05);border-radius:var(--radius);border:1px solid rgba(52,211,153,.15);font-size:12px;color:var(--text2)">
-        <strong style="color:var(--green)">📌 Already works without Microsoft Graph!</strong> Click the <strong>📧</strong> button on any task to open your Gmail/Outlook pre-filled with the task details and magic link. Configure Microsoft Graph above to make emails fully automatic.
+        <strong style="color:var(--green)">📌 Works without any configuration!</strong> Click the <strong>📧</strong> button on any task to open your mail client pre-filled with the full email. Configure either provider above for fully automatic sending.
       </div>
     </div>
-
     <div class="card" id="plant-settings-section">
       <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">🏭 Plant Groups</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:18px">Create plant groups and assign owners. Each owner will only see their plant's tasks when they log in.</div>
@@ -1728,189 +1763,333 @@ function changePlantPassword(){
 }
 
 function saveEmailSettings(){
-  const clientId = document.getElementById('ms-client-id').value.trim();
-  const tenantId = document.getElementById('ms-tenant-id').value.trim();
-  const testEmail = document.getElementById('ms-test-email').value||'';
-  localStorage.setItem('ms_client_id', clientId);
-  localStorage.setItem('ms_tenant_id', tenantId);
-  localStorage.setItem('ms_test_email', testEmail);
-  const adminNotifyEmail = document.getElementById('admin-notify-email')?.value?.trim() || localStorage.getItem('admin_notify_email') || '';
+  const clientId  = (document.getElementById('ms-client-id')?.value||'').trim();
+  const tenantId  = (document.getElementById('ms-tenant-id')?.value||'').trim();
+  const testEmail = document.getElementById('ms-test-email')?.value||'';
+  const adminNotifyEmail = (document.getElementById('admin-notify-email')?.value||'').trim();
+  const ejsService  = (document.getElementById('ejs-service-id')?.value||'').trim();
+  const ejsTemplate = (document.getElementById('ejs-template-id')?.value||'').trim();
+  const ejsKey      = (document.getElementById('ejs-public-key')?.value||'').trim();
+
+  if(clientId)  localStorage.setItem('ms_client_id', clientId);
+  if(tenantId)  localStorage.setItem('ms_tenant_id', tenantId);
+  if(testEmail) localStorage.setItem('ms_test_email', testEmail);
   if(adminNotifyEmail) localStorage.setItem('admin_notify_email', adminNotifyEmail);
-  // Reset MSAL instance so new credentials take effect
+  if(ejsService)  localStorage.setItem('ejs_service_id',  ejsService);
+  if(ejsTemplate) localStorage.setItem('ejs_template_id', ejsTemplate);
+  if(ejsKey)      localStorage.setItem('ejs_public_key',  ejsKey);
+
+  // Reset MSAL so new credentials take effect
   _msalApp = null;
-  if(_fbReady&&_db) _db.collection('settings').doc('msgraph').set({clientId,tenantId,testEmail,adminNotifyEmail},{merge:true}).catch(e=>console.warn('email settings save error',e));
-  toast('Microsoft Graph settings saved!');
+
+  // Persist to Firestore
+  if(_fbReady&&_db){
+    _db.collection('settings').doc('msgraph').set({
+      clientId,tenantId,testEmail,adminNotifyEmail,ejsService,ejsTemplate,ejsKey
+    },{merge:true}).catch(e=>console.warn('email settings save error',e));
+  }
+
+  const transport = emailTransport();
+  const transportLabel = transport==='msgraph'?'Microsoft Graph':transport==='emailjs'?'EmailJS':'mailto (fallback)';
+  toast('✅ Email settings saved — active transport: '+transportLabel);
+  // Re-render settings to update status badge
+  setTimeout(()=>renderSettings(),300);
 }
 
-// ── Email sending via Microsoft Graph API ─────────────────────────────
-// ✏️  PASTE YOUR AZURE AD APP CREDENTIALS HERE FOR PERMANENT STORAGE:
-const MS_CLIENT_ID    = '';   // e.g. 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
-const MS_TENANT_ID    = '';   // e.g. 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' or 'common'
+function switchEmailTab(tab){
+  document.getElementById('email-pane-graph').style.display = tab==='graph'?'block':'none';
+  document.getElementById('email-pane-ejs').style.display   = tab==='ejs'?'block':'none';
+  document.getElementById('email-tab-graph').style.background = tab==='graph'?'var(--accent)':'transparent';
+  document.getElementById('email-tab-graph').style.color      = tab==='graph'?'#fff':'var(--text2)';
+  document.getElementById('email-tab-ejs').style.background   = tab==='ejs'?'var(--accent)':'transparent';
+  document.getElementById('email-tab-ejs').style.color        = tab==='ejs'?'#fff':'var(--text2)';
+}
 
-// MSAL instance (initialised lazily on first use)
+// ═══════════════════════════════════════════════════════════════════════
+//  EMAIL ENGINE — Microsoft Graph + EmailJS + mailto fallback
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Hard-coded credentials (optional — users can override in Settings) ──
+const MS_CLIENT_ID = '';  // paste Azure AD App Client ID here
+const MS_TENANT_ID = '';  // paste Tenant ID or 'common' here
+const EJS_SERVICE_ID  = ''; // paste EmailJS Service ID here
+const EJS_TEMPLATE_ID = ''; // paste EmailJS Template ID here
+const EJS_PUBLIC_KEY  = ''; // paste EmailJS Public Key here
+
+// ── Config helpers ─────────────────────────────────────────────────────
+function getEmailConfig(){
+  return {
+    clientId:  localStorage.getItem('ms_client_id')   || MS_CLIENT_ID,
+    tenantId:  localStorage.getItem('ms_tenant_id')   || MS_TENANT_ID,
+    ejsService:  localStorage.getItem('ejs_service_id')  || EJS_SERVICE_ID,
+    ejsTemplate: localStorage.getItem('ejs_template_id') || EJS_TEMPLATE_ID,
+    ejsKey:      localStorage.getItem('ejs_public_key')  || EJS_PUBLIC_KEY,
+  };
+}
+function emailTransport(){
+  const c = getEmailConfig();
+  if(c.clientId && c.tenantId)   return 'msgraph';
+  if(c.ejsService && c.ejsTemplate && c.ejsKey) return 'emailjs';
+  return 'mailto';
+}
+
+// ── Timeout wrapper ────────────────────────────────────────────────────
+function withTimeout(promise, ms=18000){
+  return Promise.race([promise,
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error('Timeout')),ms))]);
+}
+
+// ── MSAL (Microsoft Graph) ─────────────────────────────────────────────
 let _msalApp = null;
 function getMsalApp(){
-  const clientId = localStorage.getItem('ms_client_id') || MS_CLIENT_ID;
-  const tenantId = localStorage.getItem('ms_tenant_id') || MS_TENANT_ID;
-  if(!clientId||!tenantId) return null;
+  const c = getEmailConfig();
+  if(!c.clientId || !c.tenantId) return null;
+  if(typeof msal === 'undefined'){
+    console.warn('MSAL library not loaded');
+    return null;
+  }
   if(!_msalApp){
-    _msalApp = new msal.PublicClientApplication({
-      auth:{ clientId, authority:'https://login.microsoftonline.com/'+tenantId, redirectUri: window.location.href.split('?')[0] },
-      cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:false }
-    });
+    try{
+      _msalApp = new msal.PublicClientApplication({
+        auth:{ clientId:c.clientId,
+               authority:'https://login.microsoftonline.com/'+c.tenantId,
+               redirectUri: window.location.href.split('?')[0] },
+        cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:true }
+      });
+    }catch(e){ console.error('MSAL init error:',e); return null; }
   }
   return _msalApp;
 }
 
-function getEmailConfig(){
-  return{
-    clientId: localStorage.getItem('ms_client_id') || MS_CLIENT_ID,
-    tenantId: localStorage.getItem('ms_tenant_id') || MS_TENANT_ID
-  };
-}
-
-// Wraps any promise with a timeout so MS Graph never hangs the UI
-function withTimeout(promise, ms=15000){
-  return Promise.race([
-    promise,
-    new Promise((_,reject)=>setTimeout(()=>reject(new Error('Microsoft Graph timeout')),ms))
-  ]);
-}
-
-// Acquire an access token silently, fallback to popup
 async function getMsAccessToken(){
   const app = getMsalApp();
-  if(!app) throw new Error('Microsoft Graph not configured');
+  if(!app) throw new Error('MSAL not available');
   const scopes = ['https://graph.microsoft.com/Mail.Send'];
   const accounts = app.getAllAccounts();
   try{
-    const resp = await app.acquireTokenSilent({ scopes, account: accounts[0] });
-    return resp.accessToken;
+    const r = await app.acquireTokenSilent({ scopes, account:accounts[0] });
+    return r.accessToken;
   }catch(e){
-    const resp = await app.acquireTokenPopup({ scopes });
-    return resp.accessToken;
+    const r = await app.acquireTokenPopup({ scopes });
+    return r.accessToken;
   }
 }
 
-// Build a rich HTML email body for a task notification
-function buildEmailHtml(task, reason, taskLink, changeDetail){
-  const reasonLabels={
-    assigned:'Task Assigned to You', updated:'Task Updated',
-    date_change:'Due Date Changed', priority_change:'Priority Changed',
-    status_change:'Status Changed', reminder:'Task Reminder', test:'Test Email'
-  };
-  const prioColor={High:'#f87171',Medium:'#fbbf24',Low:'#34d399'};
-  const label = reasonLabels[reason]||reason;
-  const toName = task.assignee.split('@')[0];
-  return `<!DOCTYPE html><html><body style="font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f7;margin:0;padding:24px;">
-  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
-    <div style="background:#1a1e2e;padding:20px 28px;">
-      <div style="font-size:18px;font-weight:800;color:#5b8dee;letter-spacing:1px;">POLYPLASTICS</div>
-      <div style="font-size:12px;color:#9aa5c0;margin-top:2px;">Task Manager</div>
+// ── Beautiful HTML email template ─────────────────────────────────────
+const REASON_LABEL = {
+  assigned:'Task Assigned to You', updated:'Task Updated',
+  date_change:'Due Date Changed', priority_change:'Priority Changed',
+  status_change:'Status Changed', reminder:'Task Reminder', test:'Test Email',
+  reply_notif:'New Reply on Task'
+};
+const PRIO_COLOR_EMAIL = {High:'#f87171',Medium:'#fbbf24',Low:'#34d399'};
+
+function buildEmailHtml(task, reason, taskLink, changeDetail=''){
+  const label = REASON_LABEL[reason] || reason;
+  const toName = (task.assignee||'User').split('@')[0];
+  const badge = `background:${PRIO_COLOR_EMAIL[task.priority]||'#ccc'}22;color:${PRIO_COLOR_EMAIL[task.priority]||'#555'};`;
+  const introText =
+    reason==='assigned'   ? 'A new task has been assigned to you. Please review the details below and acknowledge by updating the status.'
+  : reason==='reminder'   ? 'This is your scheduled reminder for a pending task. Please update the status or reply with progress.'
+  : reason==='test'       ? 'This is a test email from POLYPLASTICS Task Manager. Your email integration is working correctly! 🎉'
+  : reason==='reply_notif'? `New reply from <strong>${changeDetail.split('replied:')[0]||'User'}</strong> — open the task to respond.`
+  :                         `Your task has been updated: <strong>${changeDetail}</strong>`;
+
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${label}</title>
+<style>
+  body{margin:0;padding:0;background:#f0f2f7;font-family:'Segoe UI',Tahoma,Arial,sans-serif;}
+  .wrap{max-width:560px;margin:32px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.09);}
+  .header{background:#0f1221;padding:22px 32px;display:flex;align-items:center;gap:14px;}
+  .logo{font-size:20px;font-weight:900;color:#5b8dee;letter-spacing:1.2px;}
+  .logo-sub{font-size:11px;color:#6b7a9e;margin-top:2px;letter-spacing:.5px;}
+  .badge-type{background:#5b8dee22;color:#5b8dee;font-size:11px;font-weight:700;border-radius:20px;padding:4px 14px;letter-spacing:.4px;text-transform:uppercase;}
+  .body{padding:32px;}
+  h2{margin:0 0 6px;font-size:22px;color:#0f1221;line-height:1.3;}
+  .intro{color:#4a5270;font-size:14px;line-height:1.8;margin-bottom:24px;}
+  .info-box{background:#f7f8fc;border:1px solid #e5e8f0;border-radius:10px;padding:20px 24px;margin-bottom:24px;}
+  .info-row{display:flex;align-items:flex-start;padding:9px 0;border-bottom:1px solid #eef0f6;}
+  .info-row:last-child{border-bottom:none;}
+  .info-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#9aa5c0;min-width:100px;padding-top:2px;}
+  .info-value{font-size:13.5px;color:#0f1221;flex:1;}
+  .prio-badge{${badge}border-radius:6px;padding:2px 10px;font-size:11px;font-weight:700;display:inline-block;}
+  .cta{display:inline-block;background:#5b8dee;color:#fff !important;text-decoration:none;border-radius:9px;padding:13px 28px;font-weight:700;font-size:14px;letter-spacing:.3px;margin-bottom:8px;}
+  .cta-sub{font-size:11px;color:#9aa5c0;margin-top:6px;}
+  .footer{background:#f7f8fc;border-top:1px solid #eef0f6;padding:16px 32px;font-size:11px;color:#9aa5c0;line-height:1.7;}
+  .overdue{background:#fff0f0;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#dc2626;font-weight:600;}
+</style>
+</head><body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <div class="logo">POLYPLASTICS</div>
+      <div class="logo-sub">Task Manager</div>
     </div>
-    <div style="padding:28px;">
-      <div style="font-size:13px;color:#6b7280;margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px;font-weight:600;">${label}</div>
-      <h2 style="margin:0 0 18px;font-size:20px;color:#1a1e2e;">${(task.title||'').replace(/</g,'&lt;')}</h2>
-      <p style="color:#4a5068;font-size:14px;margin-bottom:18px;">Hi ${toName},<br><br>${
-        reason==='assigned'?'A new task has been assigned to you.'
-        :reason==='reminder'?'This is a reminder for your upcoming task.'
-        :reason==='test'?'This is a test email from POLYPLASTICS Task Manager. Your email integration is working correctly!'
-        :'Your task has been updated: <strong>'+changeDetail+'</strong>'
-      }</p>
-      <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
-        <tr><td style="padding:8px 0;border-bottom:1px solid #f0f2f7;font-size:12px;color:#9aa5c0;font-weight:600;text-transform:uppercase;width:110px;">Description</td><td style="padding:8px 0;border-bottom:1px solid #f0f2f7;font-size:13px;color:#1a1e2e;">${(task.desc||'No description provided.').replace(/</g,'&lt;')}</td></tr>
-        <tr><td style="padding:8px 0;border-bottom:1px solid #f0f2f7;font-size:12px;color:#9aa5c0;font-weight:600;text-transform:uppercase;">Due Date</td><td style="padding:8px 0;border-bottom:1px solid #f0f2f7;font-size:13px;color:#1a1e2e;">${fmt(task.due)||'—'}</td></tr>
-        <tr><td style="padding:8px 0;border-bottom:1px solid #f0f2f7;font-size:12px;color:#9aa5c0;font-weight:600;text-transform:uppercase;">Priority</td><td style="padding:8px 0;border-bottom:1px solid #f0f2f7;"><span style="background:${prioColor[task.priority]||'#ccc'}22;color:${prioColor[task.priority]||'#555'};border-radius:4px;padding:2px 10px;font-size:12px;font-weight:700;">${task.priority||'—'}</span></td></tr>
-        <tr><td style="padding:8px 0;font-size:12px;color:#9aa5c0;font-weight:600;text-transform:uppercase;">Status</td><td style="padding:8px 0;font-size:13px;color:#1a1e2e;">${task.status||'—'}</td></tr>
-      </table>
-      <a href="${taskLink}" style="display:inline-block;background:#5b8dee;color:#fff;text-decoration:none;border-radius:8px;padding:12px 24px;font-weight:700;font-size:14px;">View Task →</a>
+    <div style="margin-left:auto"><span class="badge-type">${label}</span></div>
+  </div>
+  <div class="body">
+    ${task.due && task.due < new Date().toISOString().slice(0,10) && task.status!=='Done'
+      ? `<div class="overdue">⚠️  This task is <strong>OVERDUE</strong> — immediate action required.</div>` : ''}
+    <h2>${(task.title||'').replace(/</g,'&lt;')}</h2>
+    <div class="intro">
+      Hi <strong>${toName}</strong>,<br><br>${introText}
     </div>
-    <div style="background:#f9fafb;padding:14px 28px;font-size:11px;color:#9aa5c0;border-top:1px solid #e5e7eb;">Sent by POLYPLASTICS Task Manager · Do not reply to this email</div>
-  </div></body></html>`;
+    <div class="info-box">
+      <div class="info-row"><span class="info-label">Description</span>
+        <span class="info-value">${(task.desc||'No description provided.').replace(/</g,'&lt;').replace(/\n/g,'<br>')}</span></div>
+      <div class="info-row"><span class="info-label">Due Date</span>
+        <span class="info-value" style="color:${task.due&&task.due<new Date().toISOString().slice(0,10)?'#dc2626':'inherit'}">${fmt(task.due)||'—'}</span></div>
+      <div class="info-row"><span class="info-label">Priority</span>
+        <span class="info-value"><span class="prio-badge">${task.priority||'—'}</span></span></div>
+      <div class="info-row"><span class="info-label">Status</span>
+        <span class="info-value">${task.status||'—'}</span></div>
+      <div class="info-row"><span class="info-label">Assigned To</span>
+        <span class="info-value">${(task.assignee||'—').replace(/</g,'&lt;')}</span></div>
+      ${task.tags&&task.tags.length?`<div class="info-row"><span class="info-label">Tags</span>
+        <span class="info-value">${task.tags.map(t=>`<span style="background:#5b8dee11;color:#5b8dee;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:600;margin-right:4px">${t}</span>`).join('')}</span></div>`:''}
+    </div>
+    <a href="${taskLink}" class="cta">🔗 View &amp; Update Task →</a>
+    <div class="cta-sub">No account required — link works directly in your browser.</div>
+  </div>
+  <div class="footer">
+    Sent automatically by <strong>POLYPLASTICS Task Manager</strong><br>
+    Do not reply to this email · To unsubscribe, contact your administrator<br>
+    <a href="${taskLink}" style="color:#5b8dee;text-decoration:none">Open Task</a>
+  </div>
+</div>
+</body></html>`;
 }
 
-async function sendTaskEmail(task, reason='assigned', extra={}){
-  const cfg = getEmailConfig();
-  if(!cfg.clientId||!cfg.tenantId){
-    console.warn('Microsoft Graph not configured');
-    return false;
-  }
-  const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-  const reasonLabels={
-    assigned:'Task Assigned to You', updated:'Task Updated',
-    date_change:'Due Date Changed', priority_change:'Priority Changed',
-    status_change:'Status Changed', reminder:'Task Reminder', test:'Test Email'
-  };
-  const changeDetail = extra.changeDetail || '';
-  try{
-    const token = await withTimeout(getMsAccessToken());
-    const emailPayload = {
+function buildEmailSubject(reason, taskTitle){
+  const pfx = '[POLYPLASTICS Tasks]';
+  const lbl = REASON_LABEL[reason] || reason;
+  return `${pfx} ${lbl}: ${taskTitle}`;
+}
+
+// ── Microsoft Graph send ───────────────────────────────────────────────
+async function sendViaMsGraph(toEmail, subject, htmlBody){
+  const token = await withTimeout(getMsAccessToken());
+  const res = await withTimeout(fetch('https://graph.microsoft.com/v1.0/me/sendMail',{
+    method:'POST',
+    headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+    body: JSON.stringify({
       message:{
-        subject: '[POLYPLASTICS Tasks] '+( reasonLabels[reason]||reason )+': '+task.title,
-        body:{ contentType:'HTML', content: buildEmailHtml(task, reason, taskLink, changeDetail) },
-        toRecipients:[{ emailAddress:{ address: task.assignee } }]
+        subject,
+        body:{ contentType:'HTML', content:htmlBody },
+        toRecipients:[{ emailAddress:{ address:toEmail } }]
       },
       saveToSentItems: false
-    };
-    const res = await withTimeout(fetch('https://graph.microsoft.com/v1.0/me/sendMail',{
-      method:'POST',
-      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify(emailPayload)
-    }));
-    if(!res.ok){ const err=await res.text(); throw new Error('Graph API error '+res.status+': '+err); }
+    })
+  }));
+  if(!res.ok){ const err=await res.text(); throw new Error('Graph '+res.status+': '+err); }
+  return true;
+}
+
+// ── EmailJS send ───────────────────────────────────────────────────────
+async function sendViaEmailJS(toEmail, subject, htmlBody, task){
+  const c = getEmailConfig();
+  if(typeof emailjs === 'undefined') throw new Error('EmailJS library not loaded');
+  emailjs.init({ publicKey: c.ejsKey });
+  const params = {
+    to_email:   toEmail,
+    to_name:    toEmail.split('@')[0],
+    subject:    subject,
+    message_html: htmlBody,
+    task_title: task.title||'',
+    task_due:   fmt(task.due)||'',
+    task_priority: task.priority||'',
+    task_status: task.status||'',
+    task_desc:  task.desc||'',
+    task_assignee: task.assignee||'',
+    reply_to:   'noreply@polyplastics.com',
+    from_name:  'POLYPLASTICS Task Manager',
+  };
+  const r = await withTimeout(emailjs.send(c.ejsService, c.ejsTemplate, params));
+  if(r.status !== 200) throw new Error('EmailJS: '+r.text);
+  return true;
+}
+
+// ── Unified send function ──────────────────────────────────────────────
+async function sendTaskEmail(task, reason='assigned', extra={}){
+  const transport = emailTransport();
+  if(transport === 'mailto') return false; // handled separately
+  const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
+  const subject  = buildEmailSubject(reason, task.title);
+  const htmlBody = buildEmailHtml(task, reason, taskLink, extra.changeDetail||'');
+  try{
+    if(transport === 'msgraph'){
+      await sendViaMsGraph(task.assignee, subject, htmlBody);
+    } else if(transport === 'emailjs'){
+      await sendViaEmailJS(task.assignee, subject, htmlBody, task);
+    }
     return true;
   }catch(e){
-    console.error('Microsoft Graph email error:', e.message);
+    console.error('[Email Error]', transport, e.message);
     return false;
   }
 }
 
-// Central notification dispatcher — tries Microsoft Graph first, falls back to mailto
+// ── Central dispatcher ─────────────────────────────────────────────────
 async function notifyAssignee(task, reason, extra={}){
-  const cfg = getEmailConfig();
+  const transport = emailTransport();
   const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-  if(cfg.clientId&&cfg.tenantId){
+  if(transport !== 'mailto'){
     const ok = await sendTaskEmail(task, reason, extra);
     if(ok){
-      const labels={assigned:'assigned',updated:'updated',date_change:'date-change notified',
-                    priority_change:'priority-change notified',status_change:'status-change notified'};
-      toast('📧 Email sent via Microsoft to '+task.assignee+' ('+( labels[reason]||reason )+')');
+      toast('📧 Email sent to '+task.assignee+' via '+(transport==='msgraph'?'Microsoft 365':'EmailJS'));
       return;
     }
+    toast('⚠ Email failed — falling back to mail client','var(--amber)');
   }
-  // Fallback: open mail client
   openMailtoFallback(task, taskLink, reason, extra.changeDetail||'');
 }
 
+// ── Send test email ────────────────────────────────────────────────────
 async function sendTestMail(){
-  const cfg = getEmailConfig();
-  if(!cfg.clientId||!cfg.tenantId){
-    toast('Please fill & save Microsoft Graph settings first','var(--red)');
-    const status=document.getElementById('test-mail-status');
-    if(status){status.textContent='❌ Missing Client ID or Tenant ID';status.style.color='var(--red)';}
+  const transport = emailTransport();
+  if(transport === 'mailto'){
+    toast('Configure Microsoft Graph or EmailJS in Settings first','var(--amber)');
+    const s=document.getElementById('test-mail-status');
+    if(s){s.textContent='⚠ No email provider configured';s.style.color='var(--amber)';}
     return;
   }
-  const testEmail=(document.getElementById('ms-test-email')?.value?.trim())||localStorage.getItem('ms_test_email')||'';
-  if(!testEmail){toast('Enter a Test Email address first','var(--amber)');return;}
+  const testEmail = (document.getElementById('ms-test-email')?.value?.trim()) || localStorage.getItem('ms_test_email') || '';
+  if(!testEmail){ toast('Enter a Test Email address first','var(--amber)'); return; }
 
   const btn=document.getElementById('test-mail-btn');
   const status=document.getElementById('test-mail-status');
-  if(btn){btn.disabled=true;btn.textContent='⏳ Signing in & Sending…';}
-  if(status){status.textContent='Connecting to Microsoft…';status.style.color='var(--text3)';}
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Sending…'; }
+  if(status){ status.textContent='Connecting to '+transport+'…'; status.style.color='var(--text3)'; }
 
-  // Reset MSAL instance so new credentials take effect
+  // Reset MSAL for fresh credential pickup
   _msalApp = null;
 
-  const fakeTask={assignee:testEmail,title:'Test Task — POLYPLASTICS Task Manager',desc:'This is a test email from POLYPLASTICS Task Manager. If you received this, your Microsoft Graph email integration is working correctly!',token:'test123',due:today(),priority:'Medium',status:'In Progress',reminder:'daily'};
+  const fakeTask={
+    assignee:testEmail, title:'✅ Test — POLYPLASTICS Task Manager',
+    desc:'Your email integration is working correctly! This test was sent from POLYPLASTICS Task Manager.',
+    token:'test123', due:today(), priority:'Medium', status:'In Progress', reminder:'daily', tags:['test']
+  };
   const ok = await sendTaskEmail(fakeTask,'test').catch(()=>false);
-  if(btn){btn.disabled=false;btn.textContent='📨 Send Test Email';}
+  if(btn){ btn.disabled=false; btn.textContent='📨 Send Test Email'; }
   if(ok){
     toast('✅ Test email sent to '+testEmail+'!');
-    if(status){status.textContent='✅ Sent successfully to '+testEmail;status.style.color='var(--green)';}
-  }else{
-    toast('Failed to send. Check console for details.','var(--red)');
-    if(status){status.textContent='❌ Send failed — open browser console (F12) for error details';status.style.color='var(--red)';}
+    if(status){ status.textContent='✅ Sent successfully to '+testEmail; status.style.color='var(--green)'; }
+  } else {
+    toast('Send failed. Check console (F12) for details.','var(--red)');
+    if(status){ status.textContent='❌ Send failed — open browser console (F12) for details'; status.style.color='var(--red)'; }
   }
+}
+
+// ── Preview email HTML in a new tab ───────────────────────────────────
+function previewEmailTemplate(taskId){
+  const t = taskId ? getTask(taskId) : (tasks[0]||{title:'Sample Task',assignee:'user@example.com',desc:'Sample description',due:today(),priority:'High',status:'In Progress',tags:['demo']});
+  if(!t){ toast('No task to preview','var(--amber)'); return; }
+  const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(t.assignee||'user@example.com');
+  const html = buildEmailHtml(t,'assigned',taskLink,'');
+  const w = window.open('','_blank');
+  if(w){ w.document.write(html); w.document.close(); }
+  else { toast('Popup blocked — allow popups to preview','var(--amber)'); }
 }
 
 // ── Admin session lock ────────────────────────────────────────────────
