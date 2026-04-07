@@ -1640,9 +1640,9 @@ function renderSettings(){
       if(dot) dot.style.background = 'var(--text3)';
       if(lbl){
         const cfg = getEmailConfig();
-        lbl.textContent = (!cfg.clientId || cfg.clientId.includes('YOUR_'))
+        lbl.textContent = (!cfg.clientId || !cfg.tenantId)
           ? '⚠ Enter your Azure Client ID & Tenant ID above, then click Save Settings'
-          : '⚠ Settings saved — reload page to activate Microsoft sign-in';
+          : '⚠ IDs saved — click "Sign In with Microsoft" below to authorize sending';
       }
     }
   }, 0);
@@ -1803,15 +1803,16 @@ function saveEmailSettings(){
   const ejsTemplate = (document.getElementById('ejs-template-id')?.value||'').trim();
   const ejsKey      = (document.getElementById('ejs-public-key')?.value||'').trim();
 
-  if(clientId)  localStorage.setItem('ms_client_id', clientId);
-  if(tenantId)  localStorage.setItem('ms_tenant_id', tenantId);
+  // Always save — even empty strings — so fields can be cleared and updated
+  localStorage.setItem('ms_client_id', clientId);
+  localStorage.setItem('ms_tenant_id', tenantId);
   if(testEmail) localStorage.setItem('ms_test_email', testEmail);
   if(adminNotifyEmail) localStorage.setItem('admin_notify_email', adminNotifyEmail);
   if(ejsService)  localStorage.setItem('ejs_service_id',  ejsService);
   if(ejsTemplate) localStorage.setItem('ejs_template_id', ejsTemplate);
   if(ejsKey)      localStorage.setItem('ejs_public_key',  ejsKey);
 
-  // Reset MSAL so new credentials take effect
+  // Reset MSAL so new credentials take effect immediately
   _msalApp = null;
   _msalSignedIn = false;
 
@@ -1824,8 +1825,12 @@ function saveEmailSettings(){
 
   const transport = emailTransport();
   const transportLabel = transport==='msgraph'?'Microsoft Graph':transport==='emailjs'?'EmailJS':'mailto (fallback)';
-  toast('✅ Email settings saved — active transport: '+transportLabel);
-  // Re-render settings to update status badge
+  if(transport === 'msgraph'){
+    toast('✅ IDs saved! Now click "Sign In with Microsoft" to authorize email sending.');
+  } else {
+    toast('✅ Email settings saved — active transport: '+transportLabel);
+  }
+  // Re-render settings to update status badge and show sign-in button
   setTimeout(()=>renderSettings(),300);
 }
 
@@ -1852,11 +1857,14 @@ const EJS_PUBLIC_KEY  = ''; // paste EmailJS Public Key here
 
 // ── Config helpers ─────────────────────────────────────────────────────
 function getEmailConfig(){
-  const clientId = localStorage.getItem('ms_client_id') || MS_CLIENT_ID;
-  const tenantId = localStorage.getItem('ms_tenant_id') || MS_TENANT_ID;
+  // Priority: localStorage (user-saved) → hardcoded constants
+  const rawClientId = localStorage.getItem('ms_client_id');
+  const rawTenantId = localStorage.getItem('ms_tenant_id');
+  const clientId = (rawClientId !== null) ? rawClientId : MS_CLIENT_ID;
+  const tenantId = (rawTenantId !== null) ? rawTenantId : MS_TENANT_ID;
   // Treat placeholder strings as empty — user must fill in real values
-  const cleanId  = (clientId  && !clientId.includes('YOUR_'))  ? clientId  : '';
-  const cleanTen = (tenantId  && !tenantId.includes('YOUR_'))  ? tenantId  : '';
+  const cleanId  = (clientId  && !clientId.includes('YOUR_'))  ? clientId.trim()  : '';
+  const cleanTen = (tenantId  && !tenantId.includes('YOUR_'))  ? tenantId.trim()  : '';
   return {
     clientId:  cleanId,
     tenantId:  cleanTen,
