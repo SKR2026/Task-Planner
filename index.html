@@ -1492,7 +1492,19 @@ function renderSettings(){
       <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">📧 Email Integration</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:16px">
         Configure an email provider for automatic notifications. Set up <strong>either</strong> Microsoft Graph <em>or</em> EmailJS.
-        ${(()=>{const t=emailTransport();return t==='msgraph'?'<span style="color:var(--green);font-weight:600;margin-left:8px">✅ Microsoft Graph active</span>':t==='emailjs'?'<span style="color:var(--green);font-weight:600;margin-left:8px">✅ EmailJS active</span>':'<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ Not configured — using mailto fallback</span>'})()}
+        ${(()=>{
+          const t=emailTransport();
+          if(t==='msgraph'){
+            const app=getMsalApp();
+            const signedIn = app && app.getAllAccounts().length > 0;
+            return signedIn
+              ? '<span style="color:var(--green);font-weight:600;margin-left:8px">✅ Microsoft Graph active &amp; signed in</span>'
+              : '<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ IDs saved — sign in with Microsoft below to activate</span>';
+          }
+          return t==='emailjs'
+            ? '<span style="color:var(--green);font-weight:600;margin-left:8px">✅ EmailJS active</span>'
+            : '<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ Not configured — using mailto fallback</span>';
+        })()}
       </div>
 
       <!-- Tab selector -->
@@ -1513,9 +1525,15 @@ function renderSettings(){
         </div>
         <div class="form-row">
           <div class="form-group"><label class="form-label">Azure App Client ID</label>
-            <input class="form-input" id="ms-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('ms_client_id')||''}" /></div>
+            <input class="form-input" id="ms-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${getEmailConfig().clientId||localStorage.getItem('ms_client_id')||''}" /></div>
           <div class="form-group"><label class="form-label">Tenant ID (or "common")</label>
-            <input class="form-input" id="ms-tenant-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('ms_tenant_id')||''}" /></div>
+            <input class="form-input" id="ms-tenant-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${getEmailConfig().tenantId||localStorage.getItem('ms_tenant_id')||''}" /></div>
+        </div>
+        <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:11px;color:var(--text3);font-family:monospace;line-height:1.9">
+          <div><strong style="color:var(--text2)">Currently loaded by engine:</strong></div>
+          <div>Client ID: <span style="color:${getEmailConfig().clientId?'var(--green)':'var(--red)'}">${getEmailConfig().clientId || '❌ empty / not set'}</span></div>
+          <div>Tenant ID: <span style="color:${getEmailConfig().tenantId?'var(--green)':'var(--red)'}">${getEmailConfig().tenantId || '❌ empty / not set'}</span></div>
+          <div style="margin-top:4px"><button class="btn btn-danger btn-sm" style="font-size:10px;padding:3px 10px" onclick="localStorage.removeItem('ms_client_id');localStorage.removeItem('ms_tenant_id');_msalApp=null;_msalSignedIn=false;renderSettings();toast('Cleared — enter your IDs and save','var(--amber)')">🗑 Clear Saved IDs</button></div>
         </div>
 
         <!-- Microsoft Sign-In Status -->
@@ -1857,14 +1875,15 @@ const EJS_PUBLIC_KEY  = ''; // paste EmailJS Public Key here
 
 // ── Config helpers ─────────────────────────────────────────────────────
 function getEmailConfig(){
-  // Priority: localStorage (user-saved) → hardcoded constants
-  const rawClientId = localStorage.getItem('ms_client_id');
-  const rawTenantId = localStorage.getItem('ms_tenant_id');
-  const clientId = (rawClientId !== null) ? rawClientId : MS_CLIENT_ID;
-  const tenantId = (rawTenantId !== null) ? rawTenantId : MS_TENANT_ID;
-  // Treat placeholder strings as empty — user must fill in real values
-  const cleanId  = (clientId  && !clientId.includes('YOUR_'))  ? clientId.trim()  : '';
-  const cleanTen = (tenantId  && !tenantId.includes('YOUR_'))  ? tenantId.trim()  : '';
+  // Always prefer what is explicitly saved in localStorage by the user
+  const savedClientId = localStorage.getItem('ms_client_id');
+  const savedTenantId = localStorage.getItem('ms_tenant_id');
+  // Only fall back to hardcoded constants if nothing is saved at all (null = never saved)
+  const clientId = (savedClientId !== null) ? savedClientId : MS_CLIENT_ID;
+  const tenantId = (savedTenantId !== null) ? savedTenantId : MS_TENANT_ID;
+  // Strip only the original placeholder strings — never strip user-entered values
+  const cleanId  = (clientId  && clientId.trim()  && clientId.trim()  !== 'YOUR_AZURE_APP_CLIENT_ID_HERE') ? clientId.trim()  : '';
+  const cleanTen = (tenantId  && tenantId.trim()  && tenantId.trim()  !== 'YOUR_AZURE_TENANT_ID_HERE')      ? tenantId.trim()  : '';
   return {
     clientId:  cleanId,
     tenantId:  cleanTen,
@@ -1893,8 +1912,6 @@ let _msalInitPromise = null; // ensures handleRedirectPromise is called once
 function getMsalApp(){
   const c = getEmailConfig();
   if(!c.clientId || !c.tenantId) return null;
-  // Don't init if placeholder values are still present
-  if(c.clientId.includes('YOUR_') || c.tenantId.includes('YOUR_')) return null;
   if(typeof msal === 'undefined'){
     console.warn('MSAL library not loaded');
     return null;
