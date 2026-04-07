@@ -1953,20 +1953,48 @@ async function msalSignIn(){
   const btn = document.getElementById('msal-signin-btn');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Opening Microsoft login…'; }
   try{
-    // Try silent first
+    // Try silent first (already have a cached account)
     const accounts = app.getAllAccounts();
     if(accounts.length > 0){
-      await app.acquireTokenSilent({ scopes:['https://graph.microsoft.com/Mail.Send'], account:accounts[0] });
-      updateMsalStatusBadge('signed-in', accounts[0].username);
-      toast('✅ Already signed in as '+accounts[0].username);
-      return;
+      try{
+        await app.acquireTokenSilent({ scopes:['https://graph.microsoft.com/Mail.Send'], account:accounts[0] });
+        updateMsalStatusBadge('signed-in', accounts[0].username);
+        toast('✅ Already signed in as '+accounts[0].username);
+        if(btn){ btn.disabled=false; }
+        return;
+      }catch(silentErr){
+        // silent failed — fall through to interactive
+      }
     }
-    // Use redirect (more reliable than popup for SPA files)
+    // Try popup first — works when page is served over http/https
+    try{
+      const r = await app.loginPopup({ scopes:['https://graph.microsoft.com/Mail.Send'], prompt:'select_account' });
+      if(r && r.account){
+        _msalSignedIn = true;
+        updateMsalStatusBadge('signed-in', r.account.username);
+        toast('✅ Signed in as '+r.account.username);
+        if(btn){ btn.disabled=false; }
+        return;
+      }
+    }catch(popupErr){
+      // Popup blocked or not supported — fall through to redirect
+      if(popupErr.errorCode === 'popup_window_error' || popupErr.message?.includes('popup')){
+        console.warn('[MSAL] Popup blocked, trying redirect…');
+      } else {
+        // Real auth error (user cancelled, etc.)
+        if(btn){ btn.disabled=false; btn.textContent='🔑 Sign In with Microsoft'; }
+        toast('Sign-in cancelled or failed: '+popupErr.message,'var(--amber)');
+        return;
+      }
+    }
+    // Fallback to redirect flow
     await app.loginRedirect({ scopes:['https://graph.microsoft.com/Mail.Send'], prompt:'select_account' });
   }catch(e){
     if(btn){ btn.disabled=false; btn.textContent='🔑 Sign In with Microsoft'; }
     console.error('[MSAL] Sign-in error:', e.message);
-    toast('Sign-in failed: '+e.message,'var(--red)');
+    const isFileProtocol = window.location.protocol === 'file:';
+    const hint = isFileProtocol ? ' Note: Microsoft sign-in requires the file to be served over HTTP/HTTPS, not opened as a local file.' : '';
+    toast('Sign-in failed: '+e.message+hint,'var(--red)');
   }
 }
 
@@ -1991,18 +2019,27 @@ async function getMsAccessToken(){
   if(!app) throw new Error('MSAL not available — check Client ID & Tenant ID in Settings');
   const scopes = ['https://graph.microsoft.com/Mail.Send'];
   const accounts = app.getAllAccounts();
-  if(!accounts.length) throw new Error('Not signed in to Microsoft — go to Settings → Email Integration and click "Sign In with Microsoft"');
+  if(!accounts.length) throw new Error('MS_NOT_SIGNED_IN: Not signed in to Microsoft — go to Settings → Email Integration and click "Sign In with Microsoft"');
   try{
     const r = await app.acquireTokenSilent({ scopes, account:accounts[0] });
     return r.accessToken;
   }catch(e){
-    // Silent failed — try popup as last resort
-    try{
-      const r = await app.acquireTokenPopup({ scopes });
-      return r.accessToken;
-    }catch(e2){
-      throw new Error('Microsoft auth failed: '+e2.message+' — Please sign in again from Settings → Email Integration');
+    // Silent failed — check if it's an interaction-required error
+    const isInteractionRequired = e.name === 'InteractionRequiredAuthError' ||
+      (e.message && (e.message.includes('interaction_required') || e.message.includes('consent_required') || e.message.includes('login_required')));
+    if(isInteractionRequired && window.location.protocol !== 'file:'){
+      // Try popup for token refresh (works on http/https)
+      try{
+        const r2 = await app.acquireTokenPopup({ scopes });
+        return r2.accessToken;
+      }catch(popupErr){
+        throw new Error('MS_NOT_SIGNED_IN: Token expired — go to Settings → Email Integration and click "Sign In with Microsoft" to re-authorize.');
+      }
     }
+    if(isInteractionRequired){
+      throw new Error('MS_NOT_SIGNED_IN: Token expired or consent needed — go to Settings → Email Integration and click "Sign In with Microsoft" to re-authorize.');
+    }
+    throw new Error('MS_NOT_SIGNED_IN: Microsoft auth failed: '+e.message+' — Please sign in again from Settings → Email Integration');
   }
 }
 
