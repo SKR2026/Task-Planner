@@ -2101,12 +2101,16 @@ function buildEmailSubject(reason, taskTitle){
 // ── Microsoft Graph send ───────────────────────────────────────────────
 async function sendViaMsGraph(toEmail, subject, htmlBody){
   const app = getMsalApp();
-  if(!app) throw new Error('MSAL not configured — enter Client ID & Tenant ID in Settings → Email Integration');
+  if(!app){
+    const cfg = getEmailConfig();
+    if(!cfg.clientId || !cfg.tenantId){
+      throw new Error('MS_NOT_CONFIGURED: Enter your Azure Client ID & Tenant ID in Settings → Email Integration, then save and sign in.');
+    }
+    throw new Error('MS_NOT_CONFIGURED: MSAL library not ready. Reload the page and try again.');
+  }
   const accounts = app.getAllAccounts();
   if(!accounts.length){
-    // Not signed in — prompt user to go to settings
-    toast('⚠ Microsoft not signed in — go to Settings → Email Integration → Sign In','var(--amber)');
-    throw new Error('Not signed in to Microsoft. Go to Settings → Email Integration and click "Sign In with Microsoft".');
+    throw new Error('MS_NOT_SIGNED_IN: Not signed in to Microsoft. Go to Settings → Email Integration and click "Sign In with Microsoft".');
   }
   const token = await withTimeout(getMsAccessToken());
   const res = await withTimeout(fetch('https://graph.microsoft.com/v1.0/me/sendMail',{
@@ -2156,17 +2160,13 @@ async function sendTaskEmail(task, reason='assigned', extra={}){
   const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
   const subject  = buildEmailSubject(reason, task.title);
   const htmlBody = buildEmailHtml(task, reason, taskLink, extra.changeDetail||'');
-  try{
-    if(transport === 'msgraph'){
-      await sendViaMsGraph(task.assignee, subject, htmlBody);
-    } else if(transport === 'emailjs'){
-      await sendViaEmailJS(task.assignee, subject, htmlBody, task);
-    }
-    return true;
-  }catch(e){
-    console.error('[Email Error]', transport, e.message);
-    return false;
+  // Let errors propagate so callers can distinguish the failure type
+  if(transport === 'msgraph'){
+    await sendViaMsGraph(task.assignee, subject, htmlBody);
+  } else if(transport === 'emailjs'){
+    await sendViaEmailJS(task.assignee, subject, htmlBody, task);
   }
+  return true;
 }
 
 // ── Central dispatcher ─────────────────────────────────────────────────
@@ -2174,12 +2174,24 @@ async function notifyAssignee(task, reason, extra={}){
   const transport = emailTransport();
   const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
   if(transport !== 'mailto'){
-    const ok = await sendTaskEmail(task, reason, extra);
-    if(ok){
-      toast('📧 Email sent to '+task.assignee+' via '+(transport==='msgraph'?'Microsoft 365':'EmailJS'));
-      return;
+    try{
+      const ok = await sendTaskEmail(task, reason, extra);
+      if(ok){
+        toast('📧 Email sent to '+task.assignee+' via '+(transport==='msgraph'?'Microsoft 365':'EmailJS'));
+        return;
+      }
+    }catch(e){
+      const msg = e.message || '';
+      if(msg.includes('MS_NOT_SIGNED_IN')){
+        toast('⚠ Microsoft not signed in — go to Settings → Email Integration → Sign In','var(--amber)');
+        return;
+      } else if(msg.includes('MS_NOT_CONFIGURED')){
+        toast('⚠ Microsoft not configured — enter Client ID & Tenant ID in Settings','var(--amber)');
+        return;
+      }
+      console.warn('[notifyAssignee]', transport, msg);
+      toast('⚠ Email failed — falling back to mail client','var(--amber)');
     }
-    toast('⚠ Email failed — falling back to mail client','var(--amber)');
   }
   openMailtoFallback(task, taskLink, reason, extra.changeDetail||'');
 }
@@ -2209,14 +2221,37 @@ async function sendTestMail(){
     desc:'Your email integration is working correctly! This test was sent from POLYPLASTICS Task Manager.',
     token:'test123', due:today(), priority:'Medium', status:'In Progress', reminder:'daily', tags:['test']
   };
-  const ok = await sendTaskEmail(fakeTask,'test').catch(()=>false);
+
+  let sendError = null;
+  let ok = false;
+  try {
+    ok = await sendTaskEmail(fakeTask,'test');
+  } catch(e) {
+    sendError = e;
+    ok = false;
+  }
+
   if(btn){ btn.disabled=false; btn.textContent='📨 Send Test Email'; }
+
+  // Determine the actual error message for user
+  const errMsg = sendError?.message || '';
   if(ok){
     toast('✅ Test email sent to '+testEmail+'!');
     if(status){ status.textContent='✅ Sent successfully to '+testEmail; status.style.color='var(--green)'; }
+  } else if(errMsg.includes('MS_NOT_SIGNED_IN') || errMsg.includes('Not signed in')){
+    const msg = '⚠ Not signed in to Microsoft — click "Sign In with Microsoft" below to authorize';
+    toast(msg, 'var(--amber)');
+    if(status){ status.textContent = msg; status.style.color='var(--amber)'; }
+    // Scroll to sign-in button
+    setTimeout(()=>document.getElementById('msal-signin-btn')?.scrollIntoView({behavior:'smooth',block:'center'}),200);
+  } else if(errMsg.includes('MS_NOT_CONFIGURED')){
+    const msg = '⚠ Microsoft not configured — enter your Azure Client ID & Tenant ID above and save';
+    toast(msg, 'var(--amber)');
+    if(status){ status.textContent = msg; status.style.color='var(--amber)'; }
   } else {
-    toast('Send failed. Check console (F12) for details.','var(--red)');
-    if(status){ status.textContent='❌ Send failed — open browser console (F12) for details'; status.style.color='var(--red)'; }
+    const displayErr = errMsg || 'Unknown error — check browser console (F12)';
+    toast('❌ Send failed: '+displayErr.slice(0,80), 'var(--red)');
+    if(status){ status.textContent='❌ Send failed: '+displayErr; status.style.color='var(--red)'; }
   }
 }
 
@@ -2615,6 +2650,13 @@ function sendMailtoEmail(taskId){
     sendTaskEmail(t,'assigned').then(ok=>{
       if(ok) toast('📧 Email sent via Microsoft to '+t.assignee+'!');
       else openMailtoFallback(t,taskLink);
+    }).catch(e=>{
+      const msg=e.message||'';
+      if(msg.includes('MS_NOT_SIGNED_IN')){
+        toast('⚠ Not signed in to Microsoft — go to Settings → Email Integration → Sign In','var(--amber)');
+      } else {
+        openMailtoFallback(t,taskLink);
+      }
     });
     return;
   }
@@ -2672,13 +2714,21 @@ async function sendAllReminders(){
     toast('Configure Microsoft Graph in Settings first','var(--amber)');
     return;
   }
+  // Check sign-in before looping
+  const app=getMsalApp();
+  if(!app||!app.getAllAccounts().length){
+    toast('⚠ Not signed in to Microsoft — go to Settings → Email Integration → Sign In','var(--amber)');
+    return;
+  }
   const active=tasks.filter(t=>t.reminder&&t.reminder!=='none'&&t.status!=='Done');
   if(!active.length){toast('No active reminders to send','var(--amber)');return;}
   toast('Sending '+active.length+' reminder emails…','var(--accent)');
   let sent=0,failed=0;
   for(const t of active){
-    const ok=await sendTaskEmail(t,'reminder');
-    if(ok) sent++; else failed++;
+    try{
+      const ok=await sendTaskEmail(t,'reminder');
+      if(ok) sent++; else failed++;
+    }catch(e){ failed++; console.warn('reminder send error',t.title,e.message); }
   }
   if(failed===0) toast(`✅ All ${sent} reminder emails sent!`);
   else toast(`Sent ${sent}/${active.length} emails. ${failed} failed — check console.`,'var(--amber)');
@@ -2860,6 +2910,14 @@ function sendUserTaskEmail(taskId){
     sendTaskEmail(t,'reminder').then(ok=>{
       if(ok) toast('📧 Task details emailed to '+t.assignee+'!');
       else openUserMailtoFallback(t,taskLink);
+    }).catch(e=>{
+      const msg=e.message||'';
+      if(msg.includes('MS_NOT_SIGNED_IN')){
+        toast('⚠ Microsoft not signed in — opening mail client instead','var(--amber)');
+        openUserMailtoFallback(t,taskLink);
+      } else {
+        openUserMailtoFallback(t,taskLink);
+      }
     });
     return;
   }
@@ -3160,7 +3218,7 @@ function changeDrawerStatus(s){
   renderDrawerContent();
   refreshOverdueBadge();
   // Notify assignee of the status change
-  if(s!==prev) notifyAssignee(activeDrawerTask,'status_change',{changeDetail:'Status → '+s+' (was '+prev+')'});
+  if(s!==prev) notifyAssignee(activeDrawerTask,'status_change',{changeDetail:'Status → '+s+' (was '+prev+')'}).catch(e=>console.warn('notify status change error',e.message));
 }
 
 function handleDrawerFiles(input){
@@ -3176,6 +3234,8 @@ function submitDrawerReply(){
   activeDrawerTask={...activeDrawerTask,replies:[...activeDrawerTask.replies,reply]};
   updateTask(activeDrawerTask);
   pendingFiles=[];
+  // Notify assignee of admin reply in background
+  notifyAssignee(activeDrawerTask,'updated',{changeDetail:'Admin replied: '+(text||'(attachment)').slice(0,80)}).catch(e=>console.warn('reply notify error',e.message));
   toast('Reply sent!');
   renderDrawerContent();
 }
@@ -3327,8 +3387,15 @@ function saveTask(){
             if(ok) toast('\u2705 Task created & email sent to '+assignee+'!');
             else   toast('Task created! Email failed — check Microsoft Graph settings.','var(--amber)');
           }).catch(e=>{
-            console.warn('sendTaskEmail error:',e);
-            toast('Task created! Email error — check Microsoft Graph settings.','var(--amber)');
+            const msg = e.message || '';
+            if(msg.includes('MS_NOT_SIGNED_IN')){
+              toast('Task created! ⚠ Sign in to Microsoft (Settings → Email Integration) to send emails.','var(--amber)');
+            } else if(msg.includes('MS_NOT_CONFIGURED')){
+              toast('Task created! ⚠ Configure Microsoft credentials in Settings to send emails.','var(--amber)');
+            } else {
+              console.warn('sendTaskEmail error:',e);
+              toast('Task created! Email error: '+msg.slice(0,60),'var(--amber)');
+            }
           });
           // Notify admin (fire and forget — no await, no hang)
           sendAdminTaskCreationEmail(nt).catch(e=>console.warn('admin email error:',e));
