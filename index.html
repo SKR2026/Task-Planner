@@ -1098,6 +1098,7 @@ function renderPlantTaskRows(filter){
         <div class="task-meta">
           <span>👤 ${esc(t.assignee)}</span>
           <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
+          ${t.completedDate?`<span style="color:var(--green);font-weight:600">✅ Done: ${fmt(t.completedDate)}</span>`:''}
           ${isOverdue(t)?'<span style="color:var(--red);font-weight:600">Overdue</span>':''}
         </div>
       </div>
@@ -1252,6 +1253,7 @@ function renderTaskRows(){
         <div class="task-meta">
           <span>👤 ${t.assignee}</span>
           <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
+          ${t.completedDate?`<span style="color:var(--green);font-weight:600">✅ ${fmt(t.completedDate)}</span>`:''}
           ${(t.replies||[]).length?`<span>💬 ${(t.replies||[]).length}</span>`:''}
           ${(t.attachments||[]).length?`<span>📎 ${(t.attachments||[]).length}</span>`:''}
           ${t.reminder&&t.reminder!=='none'?`<span>🔔 ${t.reminder}</span>`:''}
@@ -1302,6 +1304,7 @@ function renderKanban(){
             <span style="color:${overdue?'var(--red)':'inherit'}">📅 ${t.due?fmt(t.due):'No date'}</span>
             <span>${replies?`💬${replies} `:''}${attachments?`📎${attachments}`:''}</span>
           </div>
+          ${t.completedDate?`<div style="color:var(--green);font-size:10px;font-weight:700;margin-top:3px">✅ Done: ${fmt(t.completedDate)}</div>`:''}
         </div>
       </div>`;
     }catch(e){ return ''; }
@@ -2048,7 +2051,7 @@ const REASON_LABEL = {
   assigned:'Task Assigned to You', updated:'Task Updated',
   date_change:'Due Date Changed', priority_change:'Priority Changed',
   status_change:'Status Changed', reminder:'Task Reminder', test:'Test Email',
-  reply_notif:'New Reply on Task'
+  reply_notif:'New Reply on Task', completed:'Task Completed 🎉'
 };
 const PRIO_COLOR_EMAIL = {High:'#f87171',Medium:'#fbbf24',Low:'#34d399'};
 
@@ -2060,6 +2063,7 @@ function buildEmailHtml(task, reason, taskLink, changeDetail=''){
     reason==='assigned'   ? 'A new task has been assigned to you. Please review the details below and acknowledge by updating the status.'
   : reason==='reminder'   ? 'This is your scheduled reminder for a pending task. Please update the status or reply with progress.'
   : reason==='test'       ? 'This is a test email from POLYPLASTICS Task Manager. Your email integration is working correctly! 🎉'
+  : reason==='completed'  ? `Great news! This task has been marked as <strong>Completed</strong> on <strong>${fmt(task.completedDate)||'today'}</strong>. Well done!`
   : reason==='reply_notif'? `New reply from <strong>${changeDetail.split('replied:')[0]||'User'}</strong> — open the task to respond.`
   :                         `Your task has been updated: <strong>${changeDetail}</strong>`;
 
@@ -2112,6 +2116,8 @@ function buildEmailHtml(task, reason, taskLink, changeDetail=''){
         <span class="info-value"><span class="prio-badge">${task.priority||'—'}</span></span></div>
       <div class="info-row"><span class="info-label">Status</span>
         <span class="info-value">${task.status||'—'}</span></div>
+      ${task.completedDate ? `<div class="info-row"><span class="info-label">Completed On</span>
+        <span class="info-value" style="color:#34d399;font-weight:700">✅ ${fmt(task.completedDate)}</span></div>` : ''}
       <div class="info-row"><span class="info-label">Assigned To</span>
         <span class="info-value">${(task.assignee||'—').replace(/</g,'&lt;')}</span></div>
       ${task.tags&&task.tags.length?`<div class="info-row"><span class="info-label">Tags</span>
@@ -3009,7 +3015,7 @@ function renderUserTask(c){
 
       <div class="card" style="margin-bottom:14px;padding:16px">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px">
-          ${[['Assigned To',t.assignee],['Due Date',fmt(t.due)],['Created',fmt(t.created)],['Reminder',t.reminder]].map(([k,v])=>`
+          ${[['Assigned To',t.assignee],['Due Date',`<span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)||'—'}</span>`],['Created',fmt(t.created)||'—'],['Completed',t.completedDate?`<span style="color:var(--green);font-weight:600">${fmt(t.completedDate)}</span>`:'<span style="color:var(--text3)">—</span>'],['Reminder',t.reminder||'—']].map(([k,v])=>`
           <div><div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;margin-bottom:3px">${k}</div><div style="font-size:13px;color:var(--text)">${v}</div></div>`).join('')}
         </div>
       </div>
@@ -3065,7 +3071,8 @@ function renderUserTask(c){
 
 function userUpdateStatus(s){
   if(!userTask)return;
-  userTask={...userTask,status:s};
+  const completedDate = s==='Done' ? today() : (s!=='Done' ? '' : userTask.completedDate);
+  userTask={...userTask,status:s,completedDate};
   updateTask(userTask);
   toast('Status updated to: '+s);
   renderUserTask(document.getElementById('content'));
@@ -3158,7 +3165,13 @@ function renderDrawerContent(){
 
   <div class="card-sm" style="margin-bottom:14px">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      ${[['Assigned To',t.assignee],['Due Date',fmt(t.due)],['Created',fmt(t.created)],['Reminder','🔔 '+t.reminder]].map(([k,v])=>`
+      ${[
+        ['Assigned To', t.assignee],
+        ['Due Date', `<span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)||'—'}</span>`],
+        ['Created', fmt(t.created)||'—'],
+        ['Completed', t.completedDate ? `<span style="color:var(--green);font-weight:700">✅ ${fmt(t.completedDate)}</span>` : '<span style="color:var(--text3)">Not yet</span>'],
+        ['Reminder', '🔔 '+t.reminder]
+      ].map(([k,v])=>`
       <div><div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;margin-bottom:3px">${k}</div><div style="font-size:13px;color:var(--text)">${v}</div></div>`).join('')}
     </div>
   </div>
@@ -3250,12 +3263,19 @@ function deleteTaskFromDrawer(id){
 
 function changeDrawerStatus(s){
   const prev=activeDrawerTask.status;
-  activeDrawerTask={...activeDrawerTask,status:s};
+  const completedDate = s==='Done' ? today() : (s!=='Done' && activeDrawerTask.completedDate ? '' : activeDrawerTask.completedDate);
+  activeDrawerTask={...activeDrawerTask,status:s,completedDate};
   updateTask(activeDrawerTask);
   renderDrawerContent();
   refreshOverdueBadge();
   // Notify assignee of the status change
-  if(s!==prev) notifyAssignee(activeDrawerTask,'status_change',{changeDetail:'Status → '+s+' (was '+prev+')'}).catch(e=>console.warn('notify status change error',e.message));
+  if(s!==prev){
+    const reason = s==='Done' ? 'completed' : 'status_change';
+    const detail = s==='Done'
+      ? 'Task completed on '+fmt(today())
+      : 'Status → '+s+' (was '+prev+')';
+    notifyAssignee(activeDrawerTask, reason, {changeDetail: detail}).catch(e=>console.warn('notify status change error',e.message));
+  }
 }
 
 function handleDrawerFiles(input){
@@ -3337,6 +3357,9 @@ function openTaskModal(){
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Due Date *</label><input id="tm-due" class="form-input" type="date" value="${t?t.due:tomorrow()}"/></div>
+        <div class="form-group"><label class="form-label">Completion Date</label><input id="tm-completedDate" class="form-input" type="date" value="${t&&t.completedDate?t.completedDate:''}" placeholder="Auto-set when Done"/></div>
+      </div>
+      <div class="form-row">
         <div class="form-group"><label class="form-label">Reminder Frequency</label>
           <select id="tm-reminder" class="form-select">
             <option value="none"${t&&t.reminder==='none'?' selected':''}>No Reminder</option>
@@ -3378,7 +3401,7 @@ function saveTask(){
       if(!t){ toast('Task not found — it may have been deleted.','var(--red)'); closeTaskModal(); return; }
       const newPriority=document.getElementById('tm-priority').value;
       const newStatus=document.getElementById('tm-status').value;
-      const updated={...t,title,desc:document.getElementById('tm-desc').value,assignee,priority:newPriority,status:newStatus,due,reminder:document.getElementById('tm-reminder').value,tags};
+      const updated={...t,title,desc:document.getElementById('tm-desc').value,assignee,priority:newPriority,status:newStatus,due,completedDate:document.getElementById('tm-completedDate')?.value||t.completedDate||'',reminder:document.getElementById('tm-reminder').value,tags};
       updateTask(updated);
       // close modal & refresh UI immediately
       closeTaskModal(); refreshOverdueBadge(); showPanel(currentPanel);
@@ -3387,7 +3410,11 @@ function saveTask(){
       if(assignee!==t.assignee)    changes.push({reason:'assigned',      detail:'Reassigned to '+assignee});
       if(due!==t.due)              changes.push({reason:'date_change',   detail:'Due date → '+fmt(due)});
       if(newPriority!==t.priority) changes.push({reason:'priority_change',detail:'Priority → '+newPriority});
-      if(newStatus!==t.status)     changes.push({reason:'status_change', detail:'Status → '+newStatus});
+      if(newStatus!==t.status){
+        const reason = newStatus==='Done' ? 'completed' : 'status_change';
+        const detail = newStatus==='Done' ? 'Task completed on '+fmt(today()) : 'Status → '+newStatus;
+        changes.push({reason, detail});
+      }
       if(changes.length===0 && (title!==t.title||document.getElementById('tm-desc')?.value!==t.desc))
         changes.push({reason:'updated', detail:'Task details updated'});
       // Fire all notifications in background — do not await, prevents UI hang
@@ -3402,6 +3429,7 @@ function saveTask(){
         priority:document.getElementById('tm-priority').value,
         status:document.getElementById('tm-status').value,
         due, created:today(), token:uid(),
+        completedDate:document.getElementById('tm-completedDate')?.value||(document.getElementById('tm-status')?.value==='Done'?today():''),
         replies:[], attachments:[],
         reminder:document.getElementById('tm-reminder').value,
         tags,
@@ -3630,7 +3658,8 @@ function quickStatusCycle(id){
   const t=getTask(id); if(!t) return;
   const cycle=['To Do','In Progress','Review','Done'];
   const next=cycle[(cycle.indexOf(t.status)+1)%cycle.length];
-  updateTask({...t,status:next});
+  const completedDate = next==='Done' ? today() : (next!=='Done' ? '' : t.completedDate);
+  updateTask({...t,status:next,completedDate});
   const se=mode==='user'?(userEmail||''):(localStorage.getItem('self_email')||'');
   renderMyTaskList(se);
   toast('Status → '+next);
@@ -4246,13 +4275,14 @@ function exportJSON(){
 }
 
 function exportCSV(){
-  const headers = ['Title','Assignee','Priority','Status','Due Date','Tags','Description'];
+  const headers = ['Title','Assignee','Priority','Status','Due Date','Completion Date','Tags','Description'];
   const rows = tasks.map(t => [
     '"' + (t.title||'').replace(/"/g,'""') + '"',
     '"' + (t.assignee||'').replace(/"/g,'""') + '"',
     t.priority||'',
     t.status||'',
     t.due||'',
+    t.completedDate||'',
     '"' + (Array.isArray(t.tags)?t.tags.join(', '):(t.tags||'')).replace(/"/g,'""') + '"',
     '"' + (t.desc||t.description||'').replace(/"/g,'""') + '"'
   ]);
@@ -4282,6 +4312,7 @@ function exportPDF(){
         <span style="background:${statusColor[t.status]||'#ccc'}22;color:${statusColor[t.status]||'#555'};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">${t.status||''}</span>
       </td>
       <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${fmt(t.due)||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:${t.completedDate?'#16a34a':'#aaa'};font-weight:${t.completedDate?'700':'400'}">${t.completedDate?fmt(t.completedDate):'—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#555;">${(Array.isArray(t.tags)?t.tags.join(', '):(t.tags||''))}</td>
     </tr>`).join('');
 
@@ -4300,7 +4331,7 @@ function exportPDF(){
   <div class="sub">Generated on ${date} &nbsp;·&nbsp; Total: ${tasks.length} tasks</div>
   <table>
     <thead><tr>
-      <th>Title</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Tags</th>
+      <th>Title</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Completion Date</th><th>Tags</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>
