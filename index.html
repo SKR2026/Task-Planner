@@ -386,13 +386,13 @@ const today = () => new Date().toISOString().slice(0,10);
 const tomorrow = () => { const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); };
 const fmt = d => {
   if(!d) return '—';
-  // For YYYY-MM-DD strings, parse directly (avoids timezone shifts)
+  // For YYYY-MM-DD strings, parse directly (avoids timezone shifts) — returns DD-MM-YY
   const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if(m) return m[3]+'-'+m[2]+'-'+m[1];
+  if(m) return m[3]+'-'+m[2]+'-'+m[1].slice(2);
   // For ISO timestamp strings (e.g. created field)
   const dt = new Date(d);
   if(isNaN(dt)) return d;
-  return String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+dt.getFullYear();
+  return String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getFullYear()).slice(2);
 };
 const fmtTime = d => new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
 const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -443,8 +443,8 @@ let _unsubscribeTasks = null;
         _db.collection('settings').doc('msgraph').get().then(d=>{
           if(d.exists){
             const s=d.data();
-            if(s.clientId)         localStorage.setItem('ms_client_id',s.clientId);
-            if(s.tenantId)         localStorage.setItem('ms_tenant_id',s.tenantId);
+            if(s.clientId !== undefined)  localStorage.setItem('ms_client_id',s.clientId);
+            if(s.tenantId !== undefined)  localStorage.setItem('ms_tenant_id',s.tenantId);
             if(s.testEmail)        localStorage.setItem('ms_test_email',s.testEmail);
             if(s.adminNotifyEmail) localStorage.setItem('admin_notify_email',s.adminNotifyEmail);
             if(s.ejsService)       localStorage.setItem('ejs_service_id',s.ejsService);
@@ -458,6 +458,12 @@ let _unsubscribeTasks = null;
             renderPlantNav();
           }
         }).catch(()=>{});
+        // Load custom email templates from Firestore
+        ['assigned','status_change','completed','reminder','date_change','priority_change','updated'].forEach(key=>{
+          _db.collection('settings').doc('email_tpl_'+key).get().then(d=>{
+            if(d.exists){ localStorage.setItem('email_tpl_'+key, JSON.stringify(d.data())); }
+          }).catch(()=>{});
+        });
         // Subscribe to real-time task updates
         _unsubscribeTasks = _db.collection('tasks').onSnapshot(snap => {
           // Mark connected
@@ -708,6 +714,14 @@ function renderDashboard(){
     </div>
   </div>
 
+  <div class="card fade-in" id="dash-my-tasks-block" style="margin-bottom:22px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <div class="section-head" style="margin-bottom:0">👤 My Tasks <span id="dash-my-tasks-count" style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:10px;background:rgba(91,141,238,.12);color:var(--accent);letter-spacing:.4px;vertical-align:middle"></span></div>
+      <button class="btn btn-ghost btn-sm" onclick="showPanel('mytasks')" style="font-size:11px;">View All My Tasks →</button>
+    </div>
+    <div id="dash-my-tasks-list"></div>
+  </div>
+
   <div class="charts-grid fade-in" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
     <div class="card"><div class="section-head" style="margin-bottom:12px">By Status</div><div class="chart-wrap"><canvas id="ch-status"></canvas></div></div>
     <div class="card"><div class="section-head" style="margin-bottom:12px">By Priority</div><div class="chart-wrap"><canvas id="ch-prio"></canvas></div></div>
@@ -746,6 +760,47 @@ function renderDashboard(){
     </div>
     <div id="dash-plant-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px"></div>
   </div>`;
+
+  // ── Populate "My Tasks" dashboard block ──────────────────────────────
+  (()=>{
+    const selfEmail = mode==='user' ? (userEmail||'') : (localStorage.getItem('self_email')||'');
+    const myTasksBlock = document.getElementById('dash-my-tasks-block');
+    const myTasksList  = document.getElementById('dash-my-tasks-list');
+    const myTasksCount = document.getElementById('dash-my-tasks-count');
+    if(!selfEmail){
+      if(myTasksBlock) myTasksBlock.innerHTML = `
+        <div class="section-head" style="margin-bottom:10px">👤 My Tasks</div>
+        <div style="color:var(--text3);font-size:13px;padding:10px 0">
+          Set your identity in <a onclick="showPanel('mytasks')" style="color:var(--accent);cursor:pointer">My Tasks</a> to see your personal tasks here.
+        </div>`;
+      return;
+    }
+    const STATUS_COL_MY={'To Do':'var(--text3)','In Progress':'var(--cyan)','Review':'var(--purple)','Done':'var(--green)'};
+    const myT = tasks.filter(t=>(t.assignee||'').toLowerCase()===selfEmail.toLowerCase())
+      .sort((a,b)=>{
+        const ao=isOverdue(a)?0:(['To Do','In Progress','Review','Done'].indexOf(a.status)+1||9);
+        const bo=isOverdue(b)?0:(['To Do','In Progress','Review','Done'].indexOf(b.status)+1||9);
+        return ao-bo||(a.due||'').localeCompare(b.due||'');
+      }).slice(0,6); // show top 6
+    if(myTasksCount) myTasksCount.textContent = myT.length + (myT.length < tasks.filter(t=>(t.assignee||'').toLowerCase()===selfEmail.toLowerCase()).length ? ' (showing '+myT.length+')' : '');
+    if(!myT.length){
+      if(myTasksList) myTasksList.innerHTML=`<div style="color:var(--text3);font-size:13px;text-align:center;padding:16px 0">No tasks assigned to <strong>${selfEmail}</strong> yet.</div>`;
+      return;
+    }
+    if(myTasksList) myTasksList.innerHTML = myT.map(t=>{
+      const ov=isOverdue(t);
+      const col=ov?'var(--red)':(STATUS_COL_MY[t.status]||'var(--text3)');
+      return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer" onclick="openDrawer('${t.id}')">
+        <div style="width:6px;height:6px;border-radius:50%;background:${PRIO_COLOR[t.priority]||'var(--border)'};flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.title)}</div>
+          <div style="font-size:11px;color:var(--text3)">${ov?'<span style="color:var(--red);font-weight:600">⚠ OVERDUE</span>':t.status} &nbsp;·&nbsp; ${fmt(t.due)}</div>
+        </div>
+        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
+        <button class="btn btn-ghost btn-sm" style="color:var(--cyan);padding:4px 8px;font-size:11px" onclick="event.stopPropagation();quickStatusCycle('${t.id}')">▶</button>
+      </div>`;
+    }).join('');
+  })();
 
   // charts
   setTimeout(()=>{
@@ -1571,6 +1626,82 @@ function renderSettings(){
         <strong style="color:var(--green)">📌 Works without any configuration!</strong> Click the <strong>📧</strong> button on any task to open your mail client pre-filled with the full email. Configure either provider above for fully automatic sending.
       </div>
     </div>
+
+    <!-- ══ Email Notification Template Manager ══ -->
+    <div class="card" id="email-template-section">
+      <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">📋 Notification Email Templates</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:18px">Customise the subject line and body intro for each notification type. <strong style="color:var(--accent)">Variables:</strong> <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{task_title}}</code> <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{assignee}}</code> <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{due_date}}</code> <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{priority}}</code> <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{status}}</code> <code style="background:var(--card);padding:1px 6px;border-radius:3px">{{change_detail}}</code></div>
+
+      <!-- Tab strip for each notification type -->
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px" id="tpl-tab-strip">
+        ${[
+          ['assigned','📌 Assigned','var(--accent)'],
+          ['status_change','🔄 Status Changed','var(--purple)'],
+          ['completed','✅ Completed','var(--green)'],
+          ['reminder','🔔 Reminder','var(--amber)'],
+          ['date_change','📅 Date Changed','var(--cyan)'],
+          ['priority_change','⚡ Priority Changed','var(--red)'],
+          ['updated','✏ Updated','var(--text2)'],
+        ].map(([key,label,col],i)=>`
+          <button onclick="switchTplTab('${key}')" id="tpl-tab-${key}" style="padding:6px 13px;border-radius:8px;border:1px solid var(--border2);font-family:var(--font-body);font-size:12px;font-weight:600;cursor:pointer;background:${i===0?col:'transparent'};color:${i===0?'#fff':'var(--text2)'};transition:all .15s">${label}</button>
+        `).join('')}
+      </div>
+
+      <!-- Template editor pane -->
+      ${[
+        ['assigned','📌 Task Assigned'],
+        ['status_change','🔄 Status Changed'],
+        ['completed','✅ Task Completed'],
+        ['reminder','🔔 Reminder'],
+        ['date_change','📅 Due Date Changed'],
+        ['priority_change','⚡ Priority Changed'],
+        ['updated','✏ Task Updated'],
+      ].map(([key,label],i)=>{
+        const saved = (() => { try{ return JSON.parse(localStorage.getItem('email_tpl_'+key)||'null'); }catch(e){return null;} })();
+        const defSubj = {
+          assigned: '[POLYPLASTICS Tasks] Task Assigned: {{task_title}}',
+          status_change: '[POLYPLASTICS Tasks] Status Changed: {{task_title}}',
+          completed: '[POLYPLASTICS Tasks] Task Completed 🎉: {{task_title}}',
+          reminder: '[POLYPLASTICS Tasks] Reminder: {{task_title}} due {{due_date}}',
+          date_change: '[POLYPLASTICS Tasks] Due Date Changed: {{task_title}}',
+          priority_change: '[POLYPLASTICS Tasks] Priority Changed: {{task_title}}',
+          updated: '[POLYPLASTICS Tasks] Task Updated: {{task_title}}',
+        };
+        const defIntro = {
+          assigned: 'A new task has been assigned to you. Please review the details below and acknowledge by updating the status.',
+          status_change: 'The status of your task has been changed. Details: {{change_detail}}',
+          completed: 'Great news! This task has been marked as Completed. Well done, {{assignee}}!',
+          reminder: 'This is your scheduled reminder for the pending task "{{task_title}}" due on {{due_date}}. Please update the status or reply with progress.',
+          date_change: 'The due date for your task has been updated. New due date: {{due_date}}.',
+          priority_change: 'The priority of your task has been changed to {{priority}}. Please review and take action accordingly.',
+          updated: 'Your task has been updated. Change: {{change_detail}}',
+        };
+        const subj  = saved?.subject  || defSubj[key]  || '';
+        const intro = saved?.intro    || defIntro[key]  || '';
+        return `
+        <div id="tpl-pane-${key}" style="display:${i===0?'block':'none'}">
+          <div style="background:rgba(91,141,238,.05);border:1px dashed var(--border2);border-radius:var(--radius);padding:12px 16px;margin-bottom:14px;font-size:12px;color:var(--text3);line-height:1.9">
+            <strong style="color:var(--text2)">Template for: ${label}</strong><br>
+            Sent automatically when a task is <em>${key.replace('_',' ')}</em>. Supports variables above.
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email Subject</label>
+            <input class="form-input" id="tpl-subj-${key}" value="${esc(subj)}" placeholder="e.g. ${esc(defSubj[key])}"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Intro / Body Message</label>
+            <textarea class="form-textarea" id="tpl-intro-${key}" rows="4" placeholder="Write the opening paragraph of the email…">${esc(intro)}</textarea>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary btn-sm" onclick="saveTplSettings('${key}')">💾 Save Template</button>
+            <button class="btn btn-ghost btn-sm" onclick="previewTplTemplate('${key}')">👁 Preview Email</button>
+            <button class="btn btn-danger btn-sm" onclick="resetTplTemplate('${key}')">↺ Reset to Default</button>
+          </div>
+          <div id="tpl-save-status-${key}" style="font-size:12px;color:var(--text3);margin-top:8px;min-height:16px"></div>
+        </div>`;
+      }).join('')}
+    </div>
+
     <div class="card" id="plant-settings-section">
       <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px">🏭 Plant Groups</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:18px">Create plant groups and assign owners. Each owner will only see their plant's tasks when they log in.</div>
@@ -1808,14 +1939,14 @@ function saveEmailSettings(){
   const ejsTemplate = (document.getElementById('ejs-template-id')?.value||'').trim();
   const ejsKey      = (document.getElementById('ejs-public-key')?.value||'').trim();
 
-  // Always save — even empty strings — so fields can be cleared and updated
+  // Always save all fields — even empty strings — so cleared values propagate
   localStorage.setItem('ms_client_id', clientId);
   localStorage.setItem('ms_tenant_id', tenantId);
-  if(testEmail) localStorage.setItem('ms_test_email', testEmail);
-  if(adminNotifyEmail) localStorage.setItem('admin_notify_email', adminNotifyEmail);
-  if(ejsService)  localStorage.setItem('ejs_service_id',  ejsService);
-  if(ejsTemplate) localStorage.setItem('ejs_template_id', ejsTemplate);
-  if(ejsKey)      localStorage.setItem('ejs_public_key',  ejsKey);
+  localStorage.setItem('ms_test_email', testEmail);
+  localStorage.setItem('admin_notify_email', adminNotifyEmail);
+  localStorage.setItem('ejs_service_id',  ejsService);
+  localStorage.setItem('ejs_template_id', ejsTemplate);
+  localStorage.setItem('ejs_public_key',  ejsKey);
 
   // Reset MSAL so new credentials take effect immediately
   _msalApp = null;
@@ -1825,7 +1956,9 @@ function saveEmailSettings(){
   if(_fbReady&&_db){
     _db.collection('settings').doc('msgraph').set({
       clientId,tenantId,testEmail,adminNotifyEmail,ejsService,ejsTemplate,ejsKey
-    },{merge:true}).catch(e=>console.warn('email settings save error',e));
+    },{merge:true}).then(()=>{
+      console.log('[Settings] Email config saved to Firestore');
+    }).catch(e=>console.warn('email settings save error',e));
   }
 
   const transport = emailTransport();
@@ -1835,7 +1968,7 @@ function saveEmailSettings(){
   } else {
     toast('✅ Email settings saved — active transport: '+transportLabel);
   }
-  // Re-render settings to update status badge and show sign-in button
+  // Re-render settings to update status badge
   setTimeout(()=>renderSettings(),300);
 }
 
@@ -2058,6 +2191,74 @@ async function getMsAccessToken(){
   }
 }
 
+// ── Email Notification Template Manager ──────────────────────────────
+const TPL_TABS = ['assigned','status_change','completed','reminder','date_change','priority_change','updated'];
+
+function switchTplTab(key){
+  const COLORS = {assigned:'var(--accent)',status_change:'var(--purple)',completed:'var(--green)',reminder:'var(--amber)',date_change:'var(--cyan)',priority_change:'var(--red)',updated:'var(--text2)'};
+  TPL_TABS.forEach(k=>{
+    const pane=document.getElementById('tpl-pane-'+k);
+    const tab=document.getElementById('tpl-tab-'+k);
+    if(pane) pane.style.display = k===key?'block':'none';
+    if(tab){
+      tab.style.background = k===key?(COLORS[k]||'var(--accent)'):'transparent';
+      tab.style.color      = k===key?'#fff':'var(--text2)';
+    }
+  });
+}
+
+function saveTplSettings(key){
+  const subj  = (document.getElementById('tpl-subj-'+key)?.value||'').trim();
+  const intro = (document.getElementById('tpl-intro-'+key)?.value||'').trim();
+  localStorage.setItem('email_tpl_'+key, JSON.stringify({subject:subj, intro:intro}));
+  if(_fbReady&&_db){
+    _db.collection('settings').doc('email_tpl_'+key).set({subject:subj, intro:intro},{merge:true}).catch(e=>console.warn('tpl save error',e));
+  }
+  const st = document.getElementById('tpl-save-status-'+key);
+  if(st){ st.style.color='var(--green)'; st.textContent='✅ Template saved!'; setTimeout(()=>{ if(st) st.textContent=''; },2500); }
+  toast('📋 Template saved for: '+key.replace('_',' '));
+}
+
+function resetTplTemplate(key){
+  if(!confirm('Reset this template to the default text?')) return;
+  localStorage.removeItem('email_tpl_'+key);
+  if(_fbReady&&_db) _db.collection('settings').doc('email_tpl_'+key).delete().catch(()=>{});
+  renderSettings();
+  setTimeout(()=>switchTplTab(key),100);
+  toast('↺ Template reset to default');
+}
+
+function previewTplTemplate(key){
+  const subj  = document.getElementById('tpl-subj-'+key)?.value||'';
+  const intro = document.getElementById('tpl-intro-'+key)?.value||'';
+  const fakeTask = tasks[0]||{title:'Sample Task',assignee:'user@example.com',desc:'Sample description.',due:today(),priority:'High',status:'In Progress',tags:['demo'],completedDate:''};
+  const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(fakeTask.assignee);
+  // temporarily override saved template for preview
+  const origVal = localStorage.getItem('email_tpl_'+key);
+  localStorage.setItem('email_tpl_'+key, JSON.stringify({subject:subj,intro}));
+  const html = buildEmailHtml(fakeTask, key, taskLink, 'Status → In Progress (was To Do)');
+  // restore
+  if(origVal) localStorage.setItem('email_tpl_'+key,origVal); else localStorage.removeItem('email_tpl_'+key);
+  const w=window.open('','_blank');
+  if(w){ w.document.write(html); w.document.close(); }
+  else toast('Popup blocked — allow popups','var(--amber)');
+}
+
+function getTplConfig(key){
+  try{ return JSON.parse(localStorage.getItem('email_tpl_'+key)||'null'); }catch(e){ return null; }
+}
+
+function applyTplVars(text, task, changeDetail){
+  if(!text) return text;
+  return text
+    .replace(/{{task_title}}/g, task.title||'')
+    .replace(/{{assignee}}/g,   (task.assignee||'').split('@')[0])
+    .replace(/{{due_date}}/g,   fmt(task.due)||'—')
+    .replace(/{{priority}}/g,   task.priority||'')
+    .replace(/{{status}}/g,     task.status||'')
+    .replace(/{{change_detail}}/g, changeDetail||'');
+}
+
 // ── Beautiful HTML email template ─────────────────────────────────────
 const REASON_LABEL = {
   assigned:'Task Assigned to You', updated:'Task Updated',
@@ -2071,13 +2272,22 @@ function buildEmailHtml(task, reason, taskLink, changeDetail=''){
   const label = REASON_LABEL[reason] || reason;
   const toName = (task.assignee||'User').split('@')[0];
   const badge = `background:${PRIO_COLOR_EMAIL[task.priority]||'#ccc'}22;color:${PRIO_COLOR_EMAIL[task.priority]||'#555'};`;
-  const introText =
-    reason==='assigned'   ? 'A new task has been assigned to you. Please review the details below and acknowledge by updating the status.'
-  : reason==='reminder'   ? 'This is your scheduled reminder for a pending task. Please update the status or reply with progress.'
-  : reason==='test'       ? 'This is a test email from POLYPLASTICS Task Manager. Your email integration is working correctly! 🎉'
-  : reason==='completed'  ? `Great news! This task has been marked as <strong>Completed</strong> on <strong>${fmt(task.completedDate)||'today'}</strong>. Well done!`
-  : reason==='reply_notif'? `New reply from <strong>${changeDetail.split('replied:')[0]||'User'}</strong> — open the task to respond.`
-  :                         `Your task has been updated: <strong>${changeDetail}</strong>`;
+
+  // Use custom template if saved, otherwise fall back to built-in defaults
+  const tplCfg = getTplConfig(reason);
+  const defaultIntro = {
+    assigned:        'A new task has been assigned to you. Please review the details below and acknowledge by updating the status.',
+    reminder:        'This is your scheduled reminder for a pending task. Please update the status or reply with progress.',
+    test:            'This is a test email from POLYPLASTICS Task Manager. Your email integration is working correctly! 🎉',
+    completed:       `Great news! This task has been marked as <strong>Completed</strong> on <strong>${fmt(task.completedDate)||'today'}</strong>. Well done!`,
+    reply_notif:     `New reply from <strong>${changeDetail.split('replied:')[0]||'User'}</strong> — open the task to respond.`,
+  };
+  let introText;
+  if(tplCfg && tplCfg.intro){
+    introText = applyTplVars(tplCfg.intro, task, changeDetail).replace(/\n/g,'<br>');
+  } else {
+    introText = defaultIntro[reason] || `Your task has been updated: <strong>${changeDetail}</strong>`;
+  }
 
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2147,7 +2357,11 @@ function buildEmailHtml(task, reason, taskLink, changeDetail=''){
 </body></html>`;
 }
 
-function buildEmailSubject(reason, taskTitle){
+function buildEmailSubject(reason, taskTitle, task){
+  const tplCfg = getTplConfig(reason);
+  if(tplCfg && tplCfg.subject){
+    return applyTplVars(tplCfg.subject, task||{title:taskTitle,assignee:'',priority:'',status:'',due:''}, '');
+  }
   const pfx = '[POLYPLASTICS Tasks]';
   const lbl = REASON_LABEL[reason] || reason;
   return `${pfx} ${lbl}: ${taskTitle}`;
@@ -2213,7 +2427,7 @@ async function sendTaskEmail(task, reason='assigned', extra={}){
   const transport = emailTransport();
   if(transport === 'mailto') return false; // handled separately
   const taskLink = window.location.href.split('?')[0]+'?email='+encodeURIComponent(task.assignee);
-  const subject  = buildEmailSubject(reason, task.title);
+  const subject  = buildEmailSubject(reason, task.title, task);
   const htmlBody = buildEmailHtml(task, reason, taskLink, extra.changeDetail||'');
   // Let errors propagate so callers can distinguish the failure type
   if(transport === 'msgraph'){
