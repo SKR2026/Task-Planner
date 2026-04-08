@@ -516,13 +516,17 @@ let _unsubscribeTasks = null;
         _db.collection('settings').doc('msgraph').get().then(d=>{
           if(d.exists){
             const s=d.data();
-            if(s.clientId !== undefined)  localStorage.setItem('ms_client_id',s.clientId);
-            if(s.tenantId !== undefined)  localStorage.setItem('ms_tenant_id',s.tenantId);
+            // Only write to localStorage if the Firestore value is a non-empty string
+            // (prevents empty Firestore values from wiping user-entered credentials)
+            if(s.clientId)        localStorage.setItem('ms_client_id',s.clientId);
+            if(s.tenantId)        localStorage.setItem('ms_tenant_id',s.tenantId);
             if(s.testEmail)        localStorage.setItem('ms_test_email',s.testEmail);
             if(s.adminNotifyEmail) localStorage.setItem('admin_notify_email',s.adminNotifyEmail);
             if(s.ejsService)       localStorage.setItem('ejs_service_id',s.ejsService);
             if(s.ejsTemplate)      localStorage.setItem('ejs_template_id',s.ejsTemplate);
             if(s.ejsKey)           localStorage.setItem('ejs_public_key',s.ejsKey);
+            // After loading from Firestore, refresh settings panel if it's open
+            if(currentPanel === 'settings'){ renderSettings(); }
           }
         }).catch(()=>{});
         _db.collection('settings').doc('plantGroups').get().then(d=>{
@@ -760,7 +764,7 @@ function renderDashboard(){
       <div class="stat-value">${total}</div>
       <div class="stat-label">Total Tasks</div>
     </div>
-    <div class="stat-card" style="--c:var(--purple);cursor:pointer;grid-column:span 1;position:relative;overflow:visible;" id="my-tasks-stat-card" onclick="showPanel('mytasks')" title="View My Tasks">
+    <div class="stat-card" style="--c:var(--purple);cursor:pointer;grid-column:span 1;position:relative;overflow:visible;" id="my-tasks-stat-card" onclick="goToMyTasksFiltered()" title="View My Tasks">
       <div class="stat-icon">👤</div>
       <div class="stat-value" id="dash-my-tasks-val">—</div>
       <div class="stat-label">My Tasks</div>
@@ -786,7 +790,7 @@ function renderDashboard(){
       <div class="stat-value">${overdue}</div>
       <div class="stat-label">Overdue</div>
     </div>
-    <div class="stat-card" style="--c:var(--cyan);cursor:pointer;" onclick="goToTasksFiltered('To Do','All')" title="View To Do tasks">
+    <div class="stat-card" style="--c:var(--cyan);cursor:pointer;" onclick="goToTasksFiltered('All','All')" title="View all tasks">
       <div class="stat-icon">📈</div>
       <div class="stat-value">${rate}%</div>
       <div class="stat-label">Completion Rate</div>
@@ -2031,7 +2035,7 @@ function saveEmailSettings(){
   if(cidStatus){ cidStatus.textContent = verifyId || '❌ not saved'; cidStatus.style.color = verifyId ? 'var(--green)' : 'var(--red)'; }
   if(tidStatus){ tidStatus.textContent = verifyTen || '❌ not saved'; tidStatus.style.color = verifyTen ? 'var(--green)' : 'var(--red)'; }
 
-  // ── Step 4: Reset MSAL so new credentials take effect ───────────────
+  // ── Step 4: Reset MSAL so new credentials take effect on next use ───
   _msalApp = null;
   _msalSignedIn = false;
 
@@ -2045,14 +2049,22 @@ function saveEmailSettings(){
     }).catch(e => console.warn('[Settings] Firestore save error:', e));
   }
 
-  // ── Step 6: Show confirmation ────────────────────────────────────────
-  const transport = emailTransport();
+  // ── Step 6: Re-init MSAL with new credentials and update badge ───────
   if(clientId && tenantId){
-    toast('✅ Client ID & Tenant ID saved! Click "Sign In with Microsoft" to authorize.');
-    // Update sign-in button label
+    // Try to reinitialise immediately and check for cached accounts
+    const app = getMsalApp();
+    if(app){
+      const accounts = app.getAllAccounts();
+      if(accounts.length > 0){
+        updateMsalStatusBadge('signed-in', accounts[0].username);
+      } else {
+        updateMsalStatusBadge('signed-out');
+      }
+    }
     const signinBtn = document.getElementById('msal-signin-btn');
     if(signinBtn && signinBtn.textContent.includes('Sign In')){ signinBtn.style.boxShadow = '0 0 0 2px var(--green)'; }
-  } else if(transport === 'emailjs'){
+    toast('✅ Settings saved! Click "Sign In with Microsoft" to authorize.');
+  } else if(ejsService && ejsTemplate && ejsKey){
     toast('✅ EmailJS settings saved.');
   } else {
     toast('⚠ Settings saved — no email transport configured yet.', 'var(--amber)');
@@ -2561,6 +2573,19 @@ async function sendTestMail(){
     if(s){s.textContent='⚠ No email provider configured';s.style.color='var(--amber)';}
     return;
   }
+  // Early check: if MS Graph is configured, make sure user is signed in
+  if(transport === 'msgraph'){
+    const app = getMsalApp();
+    if(!app || app.getAllAccounts().length === 0){
+      const s=document.getElementById('test-mail-status');
+      const msg = '⚠ Not signed in to Microsoft — click "Sign In with Microsoft" first';
+      toast(msg,'var(--amber)');
+      if(s){s.textContent=msg;s.style.color='var(--amber)';}
+      updateMsalStatusBadge('signed-out');
+      setTimeout(()=>document.getElementById('msal-signin-btn')?.scrollIntoView({behavior:'smooth',block:'center'}),200);
+      return;
+    }
+  }
   const testEmail = (document.getElementById('ms-test-email')?.value?.trim()) || localStorage.getItem('ms_test_email') || '';
   if(!testEmail){ toast('Enter a Test Email address first','var(--amber)'); return; }
 
@@ -2568,9 +2593,6 @@ async function sendTestMail(){
   const status=document.getElementById('test-mail-status');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Sending…'; }
   if(status){ status.textContent='Connecting to '+transport+'…'; status.style.color='var(--text3)'; }
-
-  // Reset MSAL for fresh credential pickup
-  _msalApp = null;
 
   const fakeTask={
     assignee:testEmail, title:'✅ Test — POLYPLASTICS Task Manager',
@@ -4588,6 +4610,43 @@ function goToTasksFiltered(status, priority){
   renderTasks();
 }
 
+
+// ── Navigate to tasks filtered by admin's own email ───────────────────
+function goToMyTasksFiltered(){
+  // Plant owner: filter by plant owner emails
+  if(plantOwnerAuthenticated && currentPlantSession){
+    const ownerEmails=(currentPlantSession.owners||[]);
+    const search = ownerEmails.length ? ownerEmails[0] : '';
+    taskFilters = {status:'All', priority:'All', search: search, overdue:false};
+    currentPanel = 'tasks';
+    document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+    const hit=document.querySelector('.nav-item[onclick*="tasks"]');
+    if(hit) hit.classList.add('active');
+    document.getElementById('btn-new-task').style.display='flex';
+    document.getElementById('btn-bulk-upload').style.display='flex';
+    document.getElementById('btn-export').style.display='flex';
+    document.getElementById('topbar-title').textContent='All Tasks';
+    renderTasks();
+    return;
+  }
+  // Admin: filter by self_email identity
+  const selfEmail = localStorage.getItem('self_email') || '';
+  if(selfEmail){
+    taskFilters = {status:'All', priority:'All', search: selfEmail, overdue:false};
+    currentPanel = 'tasks';
+    document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+    const hit=document.querySelector('.nav-item[onclick*="tasks"]');
+    if(hit) hit.classList.add('active');
+    document.getElementById('btn-new-task').style.display='flex';
+    document.getElementById('btn-bulk-upload').style.display='flex';
+    document.getElementById('btn-export').style.display='flex';
+    document.getElementById('topbar-title').textContent='All Tasks';
+    renderTasks();
+  } else {
+    // No identity set — go to My Tasks to set one
+    showPanel('mytasks');
+  }
+}
 
 // ── Export Modal ──────────────────────────────────────────────────────
 function openExportModal(){
