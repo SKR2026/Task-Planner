@@ -272,6 +272,79 @@
   @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
   .fade-in { animation: fadeIn .25s ease; }
 
+  /* ─── custom date picker ─── */
+  .datepicker-wrap { position: relative; }
+  .datepicker-wrap .dp-input-row { display: flex; align-items: center; gap: 0; }
+  .datepicker-wrap .dp-text {
+    width: 100%; background: var(--bg); border: 1px solid var(--border2);
+    border-right: none; border-radius: 9px 0 0 9px; padding: 10px 13px;
+    color: var(--text); font-family: var(--font-body); font-size: 14px;
+    outline: none; transition: border-color .15s;
+  }
+  .datepicker-wrap .dp-text:focus { border-color: var(--accent); }
+  .datepicker-wrap .dp-cal-btn {
+    background: var(--bg); border: 1px solid var(--border2); border-radius: 0 9px 9px 0;
+    padding: 0 12px; cursor: pointer; color: var(--text2); font-size: 16px;
+    height: 42px; display: flex; align-items: center; transition: all .15s;
+  }
+  .datepicker-wrap .dp-cal-btn:hover { background: var(--card2); color: var(--accent); border-color: var(--accent); }
+  .dp-calendar {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 500;
+    background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius);
+    box-shadow: 0 8px 32px rgba(0,0,0,.45); padding: 14px; min-width: 260px;
+    animation: slideUp .15s ease;
+  }
+  .dp-calendar .dp-nav {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+  }
+  .dp-calendar .dp-nav-btn {
+    background: none; border: 1px solid var(--border2); border-radius: 6px;
+    color: var(--text2); cursor: pointer; font-size: 14px; padding: 4px 10px;
+    transition: all .15s;
+  }
+  .dp-calendar .dp-nav-btn:hover { background: var(--card2); color: var(--accent); border-color: var(--accent); }
+  .dp-calendar .dp-month-label {
+    font-weight: 700; font-size: 13px; color: var(--text); cursor: pointer;
+    padding: 4px 8px; border-radius: 6px; transition: background .15s;
+  }
+  .dp-calendar .dp-month-label:hover { background: var(--card2); }
+  .dp-calendar .dp-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  }
+  .dp-calendar .dp-day-name {
+    text-align: center; font-size: 10px; font-weight: 700; color: var(--text3);
+    text-transform: uppercase; padding: 4px 0; letter-spacing: .4px;
+  }
+  .dp-calendar .dp-day {
+    text-align: center; font-size: 12px; padding: 6px 0; border-radius: 6px;
+    cursor: pointer; color: var(--text2); transition: all .12s;
+  }
+  .dp-calendar .dp-day:hover { background: var(--card2); color: var(--text); }
+  .dp-calendar .dp-day.dp-today { color: var(--accent); font-weight: 700; }
+  .dp-calendar .dp-day.dp-selected { background: var(--accent); color: #fff; font-weight: 700; }
+  .dp-calendar .dp-day.dp-selected:hover { background: var(--accent2); }
+  .dp-calendar .dp-day.dp-empty { cursor: default; }
+  .dp-calendar .dp-day.dp-empty:hover { background: none; }
+  .dp-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
+  .dp-year-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px;
+  }
+  .dp-year-item {
+    text-align: center; font-size: 12px; padding: 6px 4px; border-radius: 6px;
+    cursor: pointer; color: var(--text2); transition: all .12s;
+  }
+  .dp-year-item:hover { background: var(--card2); color: var(--text); }
+  .dp-year-item.dp-selected-year { background: var(--accent); color: #fff; font-weight: 700; }
+  .dp-month-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px;
+  }
+  .dp-month-item {
+    text-align: center; font-size: 12px; padding: 8px 4px; border-radius: 6px;
+    cursor: pointer; color: var(--text2); transition: all .12s;
+  }
+  .dp-month-item:hover { background: var(--card2); color: var(--text); }
+  .dp-month-item.dp-selected-month { background: var(--accent); color: #fff; font-weight: 700; }
+
   /* ─── file upload ─── */
   .file-drop { border: 2px dashed var(--border2); border-radius: var(--radius); padding: 20px; text-align: center; color: var(--text3); font-size: 13px; cursor: pointer; transition: all .15s; }
   .file-drop:hover { border-color: var(--accent); color: var(--accent); background: rgba(91,141,238,.04); }
@@ -3596,8 +3669,8 @@ function openTaskModal(){
           <select id="tm-status" class="form-select">${STATUSES.map(s=>`<option${t&&t.status===s?' selected':''}>${s}</option>`).join('')}</select></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label class="form-label">Due Date *</label><input id="tm-due" class="form-input" type="date" value="${t?t.due:tomorrow()}"/></div>
-        <div class="form-group"><label class="form-label">Completion Date</label><input id="tm-completedDate" class="form-input" type="date" value="${t&&t.completedDate?t.completedDate:''}" placeholder="Auto-set when Done"/></div>
+        <div class="form-group"><label class="form-label">Due Date *</label>${buildDatePickerHTML('tm-due', t?t.due:tomorrow(), 'DD-MM-YY')}</div>
+        <div class="form-group"><label class="form-label">Completion Date</label>${buildDatePickerHTML('tm-completedDate', t&&t.completedDate?t.completedDate:'', 'DD-MM-YY (optional)')}</div>
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Reminder Frequency</label>
@@ -4001,7 +4074,7 @@ function openSelfTaskModal(editId){
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Due Date *</label>
-        <input id="st-due" class="form-input" type="date" value="${t?t.due:tomorrow()}"/></div>
+        ${buildDatePickerHTML('st-due', t?t.due:tomorrow(), 'DD-MM-YY')}</div>
       <div class="form-group"><label class="form-label">Reminder</label>
         <select id="st-reminder" class="form-select">
           <option value="none"${t&&t.reminder==='none'?' selected':''}>No Reminder</option>
@@ -4646,6 +4719,209 @@ function exportPDF(){
   toast('✅ PDF report opened — print to save!');
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CUSTOM DATE PICKER (DD-MM-YY display with calendar selection)
+// ═══════════════════════════════════════════════════════════════════════
+
+// Renders a custom date picker widget.
+// inputId   : the hidden input that stores YYYY-MM-DD value
+// wrapperId : the container div id
+// initVal   : initial YYYY-MM-DD value (optional)
+// label     : placeholder label shown in text box
+function buildDatePickerHTML(inputId, initVal, placeholder) {
+  const displayVal = initVal ? fmtDDMMYY(initVal) : '';
+  return `
+  <div class="datepicker-wrap" id="dpwrap-${inputId}">
+    <div class="dp-input-row">
+      <input type="text" class="dp-text" id="dptext-${inputId}"
+        value="${displayVal}"
+        placeholder="${placeholder||'DD-MM-YY'}"
+        autocomplete="off"
+        oninput="dpHandleTextInput('${inputId}', this.value)"
+        onfocus="dpHandleTextInput('${inputId}', this.value)"
+      />
+      <button type="button" class="dp-cal-btn" onclick="dpToggle('${inputId}')" title="Pick date from calendar">📅</button>
+    </div>
+    <div class="dp-hint">Format: DD-MM-YY</div>
+    <input type="hidden" id="${inputId}" value="${initVal||''}"/>
+  </div>`;
+}
+
+// Convert YYYY-MM-DD → DD-MM-YY
+function fmtDDMMYY(isoStr) {
+  if(!isoStr) return '';
+  const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[3]+'-'+m[2]+'-'+m[1].slice(2);
+  return isoStr;
+}
+
+// Parse DD-MM-YY or DD-MM-YYYY → YYYY-MM-DD (returns '' if invalid)
+function parseDDMMYY(str) {
+  if(!str) return '';
+  str = str.trim();
+  // DD-MM-YY or DD-MM-YYYY
+  const m = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if(!m) return '';
+  let [,dd,mm,yy] = m;
+  dd = dd.padStart(2,'0'); mm = mm.padStart(2,'0');
+  if(yy.length===2) yy = '20'+yy;
+  const d = new Date(`${yy}-${mm}-${dd}`);
+  if(isNaN(d.getTime())) return '';
+  return yy+'-'+mm+'-'+dd;
+}
+
+// Tracks open calendar state
+let _dpState = {};
+
+function dpHandleTextInput(inputId, val) {
+  const iso = parseDDMMYY(val);
+  const hiddenEl = document.getElementById(inputId);
+  if(hiddenEl) hiddenEl.value = iso || '';
+  // Update calendar if open
+  if(_dpState[inputId] && iso) {
+    const dt = new Date(iso+'T00:00:00');
+    _dpState[inputId].viewYear = dt.getFullYear();
+    _dpState[inputId].viewMonth = dt.getMonth();
+    dpRenderCalendar(inputId);
+  }
+}
+
+function dpToggle(inputId) {
+  const existing = document.getElementById('dpcal-'+inputId);
+  if(existing) { dpClose(inputId); return; }
+  // Get current value
+  const hiddenEl = document.getElementById(inputId);
+  const iso = hiddenEl ? hiddenEl.value : '';
+  let initDate = iso ? new Date(iso+'T00:00:00') : new Date();
+  if(isNaN(initDate)) initDate = new Date();
+  _dpState[inputId] = {
+    viewYear: initDate.getFullYear(),
+    viewMonth: initDate.getMonth(),
+    selected: iso || '',
+    view: 'days' // 'days' | 'months' | 'years'
+  };
+  dpRenderCalendar(inputId);
+  // Close when clicking outside
+  setTimeout(() => {
+    document.addEventListener('click', function handler(e) {
+      const wrap = document.getElementById('dpwrap-'+inputId);
+      if(wrap && !wrap.contains(e.target)) {
+        dpClose(inputId);
+        document.removeEventListener('click', handler);
+      }
+    });
+  }, 10);
+}
+
+function dpClose(inputId) {
+  document.getElementById('dpcal-'+inputId)?.remove();
+  delete _dpState[inputId];
+}
+
+function dpRenderCalendar(inputId) {
+  const existing = document.getElementById('dpcal-'+inputId);
+  const state = _dpState[inputId];
+  if(!state) return;
+  const wrap = document.getElementById('dpwrap-'+inputId);
+  if(!wrap) return;
+  if(existing) existing.remove();
+
+  const cal = document.createElement('div');
+  cal.className = 'dp-calendar';
+  cal.id = 'dpcal-'+inputId;
+
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const SHORT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  if(state.view === 'years') {
+    // Year picker
+    const startYear = state.viewYear - 6;
+    let yearsHTML = '';
+    for(let y = startYear; y < startYear+16; y++){
+      yearsHTML += `<div class="dp-year-item${y===state.viewYear?' dp-selected-year':''}" onclick="dpSelectYear('${inputId}',${y})">${y}</div>`;
+    }
+    cal.innerHTML = `
+      <div class="dp-nav">
+        <button type="button" class="dp-nav-btn" onclick="dpShiftYearPage('${inputId}',-1)">‹</button>
+        <span class="dp-month-label" style="cursor:default">${startYear}–${startYear+15}</span>
+        <button type="button" class="dp-nav-btn" onclick="dpShiftYearPage('${inputId}',1)">›</button>
+      </div>
+      <div class="dp-year-grid">${yearsHTML}</div>`;
+  } else if(state.view === 'months') {
+    // Month picker
+    let monthsHTML = MONTHS.map((mn,i)=>`
+      <div class="dp-month-item${i===state.viewMonth?' dp-selected-month':''}" onclick="dpSelectMonth('${inputId}',${i})">${SHORT_MONTHS[i]}</div>`).join('');
+    cal.innerHTML = `
+      <div class="dp-nav">
+        <button type="button" class="dp-nav-btn" onclick="dpShiftYear('${inputId}',-1)">‹</button>
+        <span class="dp-month-label" onclick="dpSetView('${inputId}','years')">${state.viewYear}</span>
+        <button type="button" class="dp-nav-btn" onclick="dpShiftYear('${inputId}',1)">›</button>
+      </div>
+      <div class="dp-month-grid">${monthsHTML}</div>`;
+  } else {
+    // Days view
+    const firstDay = new Date(state.viewYear, state.viewMonth, 1).getDay(); // 0=Sun
+    const daysInMonth = new Date(state.viewYear, state.viewMonth+1, 0).getDate();
+    let daysHTML = '<div class="dp-day-name">Su</div><div class="dp-day-name">Mo</div><div class="dp-day-name">Tu</div><div class="dp-day-name">We</div><div class="dp-day-name">Th</div><div class="dp-day-name">Fr</div><div class="dp-day-name">Sa</div>';
+    for(let i=0;i<firstDay;i++) daysHTML += '<div class="dp-day dp-empty"></div>';
+    const selISO = state.selected;
+    for(let d=1;d<=daysInMonth;d++){
+      const mm = String(state.viewMonth+1).padStart(2,'0');
+      const dd = String(d).padStart(2,'0');
+      const iso = `${state.viewYear}-${mm}-${dd}`;
+      const isToday = iso === today.toISOString().slice(0,10);
+      const isSel = iso === selISO;
+      daysHTML += `<div class="dp-day${isToday?' dp-today':''}${isSel?' dp-selected':''}" onclick="dpSelectDay('${inputId}','${iso}')">${d}</div>`;
+    }
+    cal.innerHTML = `
+      <div class="dp-nav">
+        <button type="button" class="dp-nav-btn" onclick="dpShiftMonth('${inputId}',-1)">‹</button>
+        <span class="dp-month-label" onclick="dpSetView('${inputId}','months')">${SHORT_MONTHS[state.viewMonth]} ${state.viewYear}</span>
+        <button type="button" class="dp-nav-btn" onclick="dpShiftMonth('${inputId}',1)">›</button>
+      </div>
+      <div class="dp-grid">${daysHTML}</div>`;
+  }
+  wrap.appendChild(cal);
+}
+
+function dpSetView(inputId, view) {
+  if(_dpState[inputId]) { _dpState[inputId].view = view; dpRenderCalendar(inputId); }
+}
+function dpShiftMonth(inputId, delta) {
+  const s = _dpState[inputId]; if(!s) return;
+  let m = s.viewMonth + delta;
+  let y = s.viewYear;
+  if(m < 0){ m=11; y--; } else if(m > 11){ m=0; y++; }
+  s.viewMonth=m; s.viewYear=y;
+  dpRenderCalendar(inputId);
+}
+function dpShiftYear(inputId, delta) {
+  const s = _dpState[inputId]; if(!s) return;
+  s.viewYear += delta; dpRenderCalendar(inputId);
+}
+function dpShiftYearPage(inputId, delta) {
+  const s = _dpState[inputId]; if(!s) return;
+  s.viewYear += delta*16; dpRenderCalendar(inputId);
+}
+function dpSelectYear(inputId, y) {
+  const s = _dpState[inputId]; if(!s) return;
+  s.viewYear = y; s.view = 'months'; dpRenderCalendar(inputId);
+}
+function dpSelectMonth(inputId, m) {
+  const s = _dpState[inputId]; if(!s) return;
+  s.viewMonth = m; s.view = 'days'; dpRenderCalendar(inputId);
+}
+function dpSelectDay(inputId, iso) {
+  const s = _dpState[inputId]; if(!s) return;
+  s.selected = iso;
+  const hiddenEl = document.getElementById(inputId);
+  if(hiddenEl) hiddenEl.value = iso;
+  const textEl = document.getElementById('dptext-'+inputId);
+  if(textEl) textEl.value = fmtDDMMYY(iso);
+  dpClose(inputId);
+}
 
 // ── Reply notification email to admin ────────────────────────────────
 async function sendReplyNotificationEmail(task, reply){
