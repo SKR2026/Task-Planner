@@ -761,9 +761,30 @@ function renderDashboard(){
 
   // ── Populate "My Tasks" stat card ────────────────────────────────────
   (()=>{
-    const selfEmail = mode==='user' ? (userEmail||'') : (localStorage.getItem('self_email')||'');
     const valEl = document.getElementById('dash-my-tasks-val');
     const subEl = document.getElementById('dash-my-tasks-sub');
+
+    // Plant owner: use their own owner email(s), never the admin's self_email
+    if(plantOwnerAuthenticated && currentPlantSession){
+      const ownerEmails=(currentPlantSession.owners||[]).map(e=>e.toLowerCase());
+      if(!ownerEmails.length){
+        if(valEl) valEl.textContent='—';
+        if(subEl){ subEl.textContent='No owner email set'; subEl.style.color='var(--text3)'; }
+        return;
+      }
+      const myT=tasks.filter(t=>ownerEmails.includes((t.assignee||'').toLowerCase()));
+      const myOpen=myT.filter(t=>t.status!=='Done').length;
+      const myOver=myT.filter(t=>isOverdue(t)).length;
+      if(valEl) valEl.textContent=myT.length;
+      if(subEl){
+        subEl.textContent=myOver?'⚠ '+myOver+' overdue · '+myOpen+' open':myOpen+' open · '+myT.filter(t=>t.status==='Done').length+' done';
+        subEl.style.color=myOver?'var(--red)':'var(--text3)';
+      }
+      return;
+    }
+
+    // Admin / user mode: use stored self_email identity
+    const selfEmail = mode==='user' ? (userEmail||'') : (localStorage.getItem('self_email')||'');
     if(!selfEmail){
       if(valEl) valEl.textContent = '—';
       if(subEl){ subEl.textContent = 'Set identity in My Tasks'; subEl.style.color='var(--text3)'; }
