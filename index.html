@@ -264,8 +264,8 @@
   .switch input:checked + .switch-slider::before { transform: translateX(16px); }
 
 
-  /* ─── plant owner mode — hide non-plant nav items ─── */
-  body.plant-owner-mode .admin-only-nav { display: none !important; }
+  /* ─── plant owner mode — show full sidebar same as admin ─── */
+  body.plant-owner-mode .admin-only-nav { display: block; }
   body.plant-owner-mode #plant-nav-items .nav-item { display: flex; }
 
   /* ─── animations ─── */
@@ -634,11 +634,9 @@ function showPanel(name){
   if(document.getElementById('admin-pwd-overlay')) return;
   // SECURITY: If in user mode, only the 'user' panel is allowed.
   if(mode==='user' && name!=='user'){ name='user'; }
-  // SECURITY: If in plant owner mode, only plant-related panels are allowed.
-  if(plantOwnerAuthenticated && !['plant','settings'].includes(name)){
-    if(['dashboard','tasks','kanban','reminders','team','mytasks'].includes(name)){
-      name='plant'; // redirect to their plant panel
-    }
+  // SECURITY: If in plant owner mode, only plant-scoped panels are allowed (all main panels permitted).
+  if(plantOwnerAuthenticated && !['dashboard','tasks','kanban','reminders','team','mytasks','plant','settings'].includes(name)){
+    name='plant'; // redirect unknown panels to their plant panel
   }
   currentPanel=name;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -664,19 +662,18 @@ function showPanel(name){
 // ═══════════════════════════════════════════════════════════════════════
 function renderDashboard(){
   if(mode==='user'){showPanel('user');return;}
-  // If plant owner is logged in, redirect to their plant panel instead
-  if(plantOwnerAuthenticated && currentPlantSession){ showPlantPanel(currentPlantSession.id); return; }
   const c=document.getElementById('content');
-  const total=tasks.length;
-  const done=tasks.filter(t=>t.status==='Done').length;
-  const inprog=tasks.filter(t=>t.status==='In Progress').length;
-  const overdue=tasks.filter(isOverdue).length;
-  const review=tasks.filter(t=>t.status==='Review').length;
+  const scopedTasks = getScopedTasks();
+  const total=scopedTasks.length;
+  const done=scopedTasks.filter(t=>t.status==='Done').length;
+  const inprog=scopedTasks.filter(t=>t.status==='In Progress').length;
+  const overdue=scopedTasks.filter(isOverdue).length;
+  const review=scopedTasks.filter(t=>t.status==='Review').length;
   const rate=total?Math.round(done/total*100):0;
 
   c.innerHTML=`
-  <div class="panel-title fade-in">Command Centre</div>
-  <div class="panel-sub">Live overview of all tasks, team performance, and deadlines</div>
+  <div class="panel-title fade-in">Command Centre${plantOwnerAuthenticated&&currentPlantSession?' — 🏭 '+esc(currentPlantSession.name):''}</div>
+  <div class="panel-sub">Live overview of ${plantOwnerAuthenticated&&currentPlantSession?'your plant tasks':'all tasks'}, team performance, and deadlines</div>
 
   <div class="stats-grid fade-in">
     <div class="stat-card" style="--c:var(--accent);cursor:pointer;" onclick="goToTasksFiltered('All','All')" title="View all tasks">
@@ -754,7 +751,7 @@ function renderDashboard(){
   setTimeout(()=>{
     const statusData={
       labels:STATUSES,
-      datasets:[{data:STATUSES.map(s=>tasks.filter(t=>t.status===s).length),
+      datasets:[{data:STATUSES.map(s=>scopedTasks.filter(t=>t.status===s).length),
       backgroundColor:['rgba(156,163,176,.7)','rgba(91,141,238,.7)','rgba(167,139,250,.7)','rgba(52,211,153,.7)'],
       borderWidth:0,hoverOffset:4}]};
     destroyChart('ch-status');
@@ -762,7 +759,7 @@ function renderDashboard(){
 
     const prioData={
       labels:PRIOS,
-      datasets:[{data:PRIOS.map(p=>tasks.filter(t=>t.priority===p).length),
+      datasets:[{data:PRIOS.map(p=>scopedTasks.filter(t=>t.priority===p).length),
       backgroundColor:['rgba(248,113,113,.7)','rgba(251,191,36,.7)','rgba(52,211,153,.7)'],
       borderWidth:0}]};
     destroyChart('ch-prio');
@@ -775,7 +772,7 @@ function renderDashboard(){
       const wStart=new Date(now); wStart.setDate(now.getDate()-now.getDay()-(i*7));
       const wEnd=new Date(wStart); wEnd.setDate(wStart.getDate()+6);
       const ws=wStart.toISOString().slice(0,10); const we=wEnd.toISOString().slice(0,10);
-      trendVals.push(tasks.filter(t=>t.created&&t.created>=ws&&t.created<=we).length);
+      trendVals.push(scopedTasks.filter(t=>t.created&&t.created>=ws&&t.created<=we).length);
       weeks.push(i===0?'This wk':i===1?'Last wk':(i+'w ago'));
     }
     destroyChart('ch-trend');
@@ -783,7 +780,7 @@ function renderDashboard(){
 
     // assignee chart
     const assigneeMap={};
-    tasks.forEach(t=>{
+    scopedTasks.forEach(t=>{
       if(!t.assignee) return;
       const name=t.assignee.split('@')[0]; // shorten email to name part
       assigneeMap[name]=(assigneeMap[name]||0)+1;
@@ -815,28 +812,18 @@ function renderDashboard(){
     });
 
     // ── On-Time Compliance by Assignee ──────────────────────────────
-    // Only Done tasks are counted. On-time = closedAt (or today as proxy) <= due date.
-    // Since tasks may not have a closedAt field, we use due date vs created date heuristic:
-    // a Done task is "on time" if its due date >= created date (i.e. not already overdue when closed).
-    // Better proxy: Done tasks whose due >= today's date at time of completion.
-    // Practical approach: Done tasks are on-time if due >= created (task wasn't already past due when assigned)
-    // and due is not in the past relative to a reasonable close window.
-    // We use: onTime = done task where due date >= created date (assigned before due).
-    // For tasks with a closedAt field (future-proof), use that.
     (()=>{
-      const assignees=[...new Set(tasks.filter(t=>t.assignee).map(t=>t.assignee.split('@')[0]))];
+      const assignees=[...new Set(scopedTasks.filter(t=>t.assignee).map(t=>t.assignee.split('@')[0]))];
       const complianceVals=assignees.map(name=>{
-        const doneTasks=tasks.filter(t=>t.assignee&&t.assignee.split('@')[0]===name&&t.status==='Done');
+        const doneTasks=scopedTasks.filter(t=>t.assignee&&t.assignee.split('@')[0]===name&&t.status==='Done');
         if(!doneTasks.length) return 0;
         const onTime=doneTasks.filter(t=>{
           const closeDate=t.closedAt||t.doneAt||null;
           if(closeDate) return closeDate<=t.due;
-          // Fallback: if no explicit close date, assume on-time if due >= created (reasonable heuristic)
           return t.due&&t.created&&t.due>=t.created;
         }).length;
         return Math.round(onTime/doneTasks.length*100);
       });
-      // Color: green if >=80%, amber if 50-79%, red if <50%
       const compColors=complianceVals.map(v=>v>=80?'rgba(52,211,153,.75)':v>=50?'rgba(251,191,36,.75)':'rgba(248,113,113,.75)');
       destroyChart('ch-compliance');
       chartInstances['ch-compliance']=new Chart(document.getElementById('ch-compliance'),{
@@ -872,13 +859,13 @@ function renderDashboard(){
 
     // ── Avg Days to Close (vs original assigned/created date) ───────
     (()=>{
-      const assignees=[...new Set(tasks.filter(t=>t.assignee).map(t=>t.assignee.split('@')[0]))];
+      const assignees=[...new Set(scopedTasks.filter(t=>t.assignee).map(t=>t.assignee.split('@')[0]))];
       const avgDaysVals=assignees.map(name=>{
-        const doneTasks=tasks.filter(t=>t.assignee&&t.assignee.split('@')[0]===name&&t.status==='Done'&&t.created);
+        const doneTasks=scopedTasks.filter(t=>t.assignee&&t.assignee.split('@')[0]===name&&t.status==='Done'&&t.created);
         if(!doneTasks.length) return null;
         const totalDays=doneTasks.reduce((sum,t)=>{
           const closeDate=t.closedAt||t.doneAt||null;
-          const end=closeDate?new Date(closeDate):new Date(); // use today as proxy if no close date
+          const end=closeDate?new Date(closeDate):new Date();
           const start=new Date(t.created);
           const diff=Math.max(0,Math.round((end-start)/(1000*60*60*24)));
           return sum+diff;
@@ -918,12 +905,12 @@ function renderDashboard(){
     })();
 
     // team table
-    const byPerson=[...new Set(tasks.map(t=>t.assignee))].map(e=>({email:e,total:tasks.filter(t=>t.assignee===e).length,done:tasks.filter(t=>t.assignee===e&&t.status==='Done').length}));
+    const byPerson=[...new Set(scopedTasks.map(t=>t.assignee))].map(e=>({email:e,total:scopedTasks.filter(t=>t.assignee===e).length,done:scopedTasks.filter(t=>t.assignee===e&&t.status==='Done').length}));
     document.getElementById('team-tbl').innerHTML=`<thead><tr><th>Member</th><th>Total</th><th>Done</th><th style="width:120px">Progress</th></tr></thead><tbody>`+
       byPerson.map(p=>{const pct=p.total?Math.round(p.done/p.total*100):0;return`<tr><td><div style="font-size:13px;color:var(--text)">${p.email}</div></td><td>${p.total}</td><td style="color:var(--green)">${p.done}</td><td><div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:var(--accent)"></div></div><div style="font-size:10px;color:var(--text3);margin-top:3px">${pct}%</div></td></tr>`;}).join('')+`</tbody>`;
 
     // upcoming
-    const upcoming=tasks.filter(t=>t.status!=='Done').sort((a,b)=>a.due.localeCompare(b.due)).slice(0,5);
+    const upcoming=scopedTasks.filter(t=>t.status!=='Done').sort((a,b)=>a.due.localeCompare(b.due)).slice(0,5);
     document.getElementById('upcoming-list').innerHTML=upcoming.length?upcoming.map(t=>`
       <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer" onclick="openDrawer('${t.id}')">
         <div style="width:6px;height:6px;border-radius:50%;background:${PRIO_COLOR[t.priority]};flex-shrink:0"></div>
@@ -1154,12 +1141,11 @@ let _selectedTasks = new Set();
 
 function renderTasks(){
   if(mode==='user'){showPanel('user');return;}
-  if(plantOwnerAuthenticated&&currentPlantSession){showPlantPanel(currentPlantSession.id);return;}
   _selectedTasks.clear();
   const c=document.getElementById('content');
   c.innerHTML=`
   <div class="panel-title fade-in">All Tasks</div>
-  <div class="panel-sub">${tasks.length} total tasks across all team members</div>
+  <div class="panel-sub">${getScopedTasks().length} total tasks${plantOwnerAuthenticated&&currentPlantSession?' for 🏭 '+esc(currentPlantSession.name):' across all team members'}</div>
   <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;align-items:center" class="fade-in">
     <input id="tf-search" class="form-input" style="max-width:280px;padding:9px 13px" placeholder="🔍  Search tasks or members…" value="${taskFilters.search}" oninput="taskFilters.search=this.value;renderTaskRows()"/>
     <select id="tf-status" class="form-select" style="max-width:160px" onchange="taskFilters.status=this.value;taskFilters.overdue=false;renderTaskRows()">
@@ -1284,7 +1270,6 @@ function deleteTask(id){
 // ═══════════════════════════════════════════════════════════════════════
 function renderKanban(){
   if(mode==='user'){showPanel('user');return;}
-  if(plantOwnerAuthenticated&&currentPlantSession){showPlantPanel(currentPlantSession.id);return;}
   const c=document.getElementById('content');
 
   function kanbanCard(t){
