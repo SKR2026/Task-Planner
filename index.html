@@ -781,17 +781,13 @@ function renderDashboard(){
 
   // charts
   setTimeout(()=>{
-    const isLight=document.body.classList.contains('light');
-    const chartTick=isLight?'#111827':'#e2e8f0';
-    const chartGrid=isLight?'rgba(0,0,0,.1)':'rgba(255,255,255,.12)';
-
     const statusData={
       labels:STATUSES,
       datasets:[{data:STATUSES.map(s=>scopedTasks.filter(t=>t.status===s).length),
       backgroundColor:['rgba(156,163,176,.7)','rgba(91,141,238,.7)','rgba(167,139,250,.7)','rgba(52,211,153,.7)'],
       borderWidth:0,hoverOffset:4}]};
     destroyChart('ch-status');
-    chartInstances['ch-status']=new Chart(document.getElementById('ch-status'),{type:'doughnut',data:statusData,options:{plugins:{legend:{position:'right',labels:{color:chartTick,boxWidth:10,font:{size:11}}}},cutout:'65%',maintainAspectRatio:false}});
+    chartInstances['ch-status']=new Chart(document.getElementById('ch-status'),{type:'doughnut',data:statusData,options:{plugins:{legend:{position:'right',labels:{color:'#9aa5c0',boxWidth:10,font:{size:11}}}},cutout:'65%',maintainAspectRatio:false}});
 
     const prioData={
       labels:PRIOS,
@@ -799,7 +795,7 @@ function renderDashboard(){
       backgroundColor:['rgba(248,113,113,.7)','rgba(251,191,36,.7)','rgba(52,211,153,.7)'],
       borderWidth:0}]};
     destroyChart('ch-prio');
-    chartInstances['ch-prio']=new Chart(document.getElementById('ch-prio'),{type:'bar',data:prioData,options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:chartTick,font:{size:11}},grid:{color:chartGrid}},y:{ticks:{color:chartTick,font:{size:11}},grid:{color:chartGrid}}},maintainAspectRatio:false}});
+    chartInstances['ch-prio']=new Chart(document.getElementById('ch-prio'),{type:'bar',data:prioData,options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}});
 
     // Weekly trend — count tasks created per week for last 6 weeks
     const now=new Date();
@@ -812,7 +808,7 @@ function renderDashboard(){
       weeks.push(i===0?'This wk':i===1?'Last wk':(i+'w ago'));
     }
     destroyChart('ch-trend');
-    chartInstances['ch-trend']=new Chart(document.getElementById('ch-trend'),{type:'line',data:{labels:weeks,datasets:[{data:trendVals,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.08)',tension:.4,fill:true,pointBackgroundColor:'#34d399',pointRadius:4}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:chartTick,font:{size:10}},grid:{color:chartGrid}},y:{ticks:{color:chartTick,font:{size:10},stepSize:1},grid:{color:chartGrid}}},maintainAspectRatio:false}});
+    chartInstances['ch-trend']=new Chart(document.getElementById('ch-trend'),{type:'line',data:{labels:weeks,datasets:[{data:trendVals,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.08)',tension:.4,fill:true,pointBackgroundColor:'#34d399',pointRadius:4}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:10},stepSize:1},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}});
 
     // assignee chart
     const assigneeMap={};
@@ -840,8 +836,8 @@ function renderDashboard(){
         indexAxis:'y',
         plugins:{legend:{display:false}},
         scales:{
-          x:{ticks:{color:chartTick,font:{size:10},stepSize:1},grid:{color:chartGrid}},
-          y:{ticks:{color:chartTick,font:{size:10}},grid:{display:false}}
+          x:{ticks:{color:'#9aa5c0',font:{size:10},stepSize:1},grid:{color:'rgba(255,255,255,.04)'}},
+          y:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{display:false}}
         },
         maintainAspectRatio:false
       }
@@ -883,10 +879,10 @@ function renderDashboard(){
           scales:{
             x:{
               min:0,max:100,
-              ticks:{color:chartTick,font:{size:10},callback:v=>v+'%'},
-              grid:{color:chartGrid}
+              ticks:{color:'#9aa5c0',font:{size:10},callback:v=>v+'%'},
+              grid:{color:'rgba(255,255,255,.04)'}
             },
-            y:{ticks:{color:chartTick,font:{size:10}},grid:{display:false}}
+            y:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{display:false}}
           },
           maintainAspectRatio:false
         }
@@ -930,10 +926,10 @@ function renderDashboard(){
           },
           scales:{
             x:{
-              ticks:{color:chartTick,font:{size:10},callback:v=>v+'d'},
-              grid:{color:chartGrid}
+              ticks:{color:'#9aa5c0',font:{size:10},callback:v=>v+'d'},
+              grid:{color:'rgba(255,255,255,.04)'}
             },
-            y:{ticks:{color:chartTick,font:{size:10}},grid:{display:false}}
+            y:{ticks:{color:'#9aa5c0',font:{size:10}},grid:{display:false}}
           },
           maintainAspectRatio:false
         }
@@ -1044,22 +1040,19 @@ function renderPlantPanel(){
   </div>`;
 
   setTimeout(()=>{
-    const isLight=document.body.classList.contains('light');
-    const chartTick=isLight?'#111827':'#e2e8f0';
-    const chartGrid=isLight?'rgba(0,0,0,.1)':'rgba(255,255,255,.12)';
     // status chart
     destroyChart('pch-status');
     chartInstances['pch-status']=new Chart(document.getElementById('pch-status'),{
       type:'doughnut',
       data:{labels:STATUSES,datasets:[{data:STATUSES.map(s=>plantTasks.filter(t=>t.status===s).length),backgroundColor:['rgba(156,163,176,.7)','rgba(91,141,238,.7)','rgba(167,139,250,.7)','rgba(52,211,153,.7)'],borderWidth:0,hoverOffset:4}]},
-      options:{plugins:{legend:{position:'right',labels:{color:chartTick,boxWidth:10,font:{size:11}}}},cutout:'65%',maintainAspectRatio:false}
+      options:{plugins:{legend:{position:'right',labels:{color:'#9aa5c0',boxWidth:10,font:{size:11}}}},cutout:'65%',maintainAspectRatio:false}
     });
     // prio chart
     destroyChart('pch-prio');
     chartInstances['pch-prio']=new Chart(document.getElementById('pch-prio'),{
       type:'bar',
       data:{labels:PRIOS,datasets:[{data:PRIOS.map(p=>plantTasks.filter(t=>t.priority===p).length),backgroundColor:['rgba(248,113,113,.7)','rgba(251,191,36,.7)','rgba(52,211,153,.7)'],borderWidth:0}]},
-      options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:chartTick,font:{size:11}},grid:{color:chartGrid}},y:{ticks:{color:chartTick,font:{size:11}},grid:{color:chartGrid}}},maintainAspectRatio:false}
+      options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#9aa5c0',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}}},maintainAspectRatio:false}
     });
     // task list
     renderPlantTaskRows('All');
