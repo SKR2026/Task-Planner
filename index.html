@@ -592,7 +592,7 @@ document.getElementById('current-date').textContent =
 
 // ── overdue badge ─────────────────────────────────────────────────────
 function refreshOverdueBadge(){
-  const n=tasks.filter(t=>isOverdue(t)).length;
+  const n=getScopedTasks().filter(t=>isOverdue(t)).length;
   const b=document.getElementById('overdue-badge');
   b.style.display=n?'inline':'none'; b.textContent=n;
 }
@@ -1221,7 +1221,7 @@ function bulkDeleteTasks(){
 }
 
 function renderTaskRows(){
-  const filtered=tasks.filter(t=>{
+  const filtered=getScopedTasks().filter(t=>{
     const ss=(taskFilters.overdue===true) ? isOverdue(t) : (taskFilters.status==='All'||t.status===taskFilters.status);
     const sp=taskFilters.priority==='All'||t.priority===taskFilters.priority;
     const sq=!taskFilters.search||t.title.toLowerCase().includes(taskFilters.search.toLowerCase())||t.assignee.toLowerCase().includes(taskFilters.search.toLowerCase());
@@ -1296,7 +1296,7 @@ function renderKanban(){
   }
 
   function kanbanCol(status){
-    const col = tasks.filter(t=>t.status===status);
+    const col = getScopedTasks().filter(t=>t.status===status);
     const color = STATUS_COLOR[status]||'var(--text3)';
     const cards = col.map(kanbanCard).join('');
     const empty = col.length===0
@@ -1325,8 +1325,9 @@ function renderKanban(){
 function renderReminders(){
   if(mode==='user'){showPanel('user');return;}
   const c=document.getElementById('content');
-  const active=tasks.filter(t=>t.reminder&&t.reminder!=='none'&&t.status!=='Done');
-  const overdue=tasks.filter(isOverdue);
+  const st=getScopedTasks();
+  const active=st.filter(t=>t.reminder&&t.reminder!=='none'&&t.status!=='Done');
+  const overdue=st.filter(isOverdue);
   c.innerHTML=`
   <div class="panel-title fade-in">Reminders & Notifications</div>
   <div class="panel-sub">Automated email reminders sent to assignees at configured frequency</div>
@@ -1337,7 +1338,7 @@ function renderReminders(){
   <div class="stats-grid fade-in" style="max-width:600px">
     <div class="stat-card" style="--c:var(--amber)"><div class="stat-icon">🔔</div><div class="stat-value">${active.length}</div><div class="stat-label">Active Reminders</div></div>
     <div class="stat-card" style="--c:var(--red)"><div class="stat-icon">⚠</div><div class="stat-value">${overdue.length}</div><div class="stat-label">Overdue Tasks</div></div>
-    <div class="stat-card" style="--c:var(--cyan)"><div class="stat-icon">📧</div><div class="stat-value">${tasks.filter(t=>t.reminder==='daily').length}</div><div class="stat-label">Daily Reminders</div></div>
+    <div class="stat-card" style="--c:var(--cyan)"><div class="stat-icon">📧</div><div class="stat-value">${st.filter(t=>t.reminder==='daily').length}</div><div class="stat-label">Daily Reminders</div></div>
   </div>
 
   ${active.length?`
@@ -1397,16 +1398,17 @@ function renderReminders(){
 // ═══════════════════════════════════════════════════════════════════════
 function renderTeam(){
   if(mode==='user'){showPanel('user');return;}
+  const st=getScopedTasks();
   // Normalise to lowercase so mixed-case duplicates are merged
-  const uniqueEmails=[...new Set(tasks.map(t=>t.assignee.toLowerCase()))];
+  const uniqueEmails=[...new Set(st.map(t=>t.assignee.toLowerCase()))];
   const members=uniqueEmails.map(email=>{
-    const myTasks=tasks.filter(t=>t.assignee.toLowerCase()===email);
+    const myTasks=st.filter(t=>t.assignee.toLowerCase()===email);
     return{email,total:myTasks.length,done:myTasks.filter(t=>t.status==='Done').length,inprog:myTasks.filter(t=>t.status==='In Progress').length,overdue:myTasks.filter(isOverdue).length};
   });
   const c=document.getElementById('content');
   c.innerHTML=`
   <div class="panel-title fade-in">Team Overview</div>
-  <div class="panel-sub">${members.length} active members across all projects</div>
+  <div class="panel-sub">${members.length} active members${plantOwnerAuthenticated&&currentPlantSession?' in 🏭 '+esc(currentPlantSession.name):' across all projects'}</div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px" class="fade-in">
   ${members.map(m=>{
     const pct=m.total?Math.round(m.done/m.total*100):0;
