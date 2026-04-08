@@ -516,8 +516,6 @@ let _unsubscribeTasks = null;
         _db.collection('settings').doc('msgraph').get().then(d=>{
           if(d.exists){
             const s=d.data();
-            // Only write to localStorage if the Firestore value is a non-empty string
-            // (prevents empty Firestore values from wiping user-entered credentials)
             if(s.clientId)        localStorage.setItem('ms_client_id',s.clientId);
             if(s.tenantId)        localStorage.setItem('ms_tenant_id',s.tenantId);
             if(s.testEmail)        localStorage.setItem('ms_test_email',s.testEmail);
@@ -525,8 +523,6 @@ let _unsubscribeTasks = null;
             if(s.ejsService)       localStorage.setItem('ejs_service_id',s.ejsService);
             if(s.ejsTemplate)      localStorage.setItem('ejs_template_id',s.ejsTemplate);
             if(s.ejsKey)           localStorage.setItem('ejs_public_key',s.ejsKey);
-            // After loading from Firestore, refresh settings panel if it's open
-            if(currentPanel === 'settings'){ renderSettings(); }
           }
         }).catch(()=>{});
         _db.collection('settings').doc('plantGroups').get().then(d=>{
@@ -2035,7 +2031,7 @@ function saveEmailSettings(){
   if(cidStatus){ cidStatus.textContent = verifyId || '❌ not saved'; cidStatus.style.color = verifyId ? 'var(--green)' : 'var(--red)'; }
   if(tidStatus){ tidStatus.textContent = verifyTen || '❌ not saved'; tidStatus.style.color = verifyTen ? 'var(--green)' : 'var(--red)'; }
 
-  // ── Step 4: Reset MSAL so new credentials take effect on next use ───
+  // ── Step 4: Reset MSAL so new credentials take effect ───────────────
   _msalApp = null;
   _msalSignedIn = false;
 
@@ -2049,22 +2045,14 @@ function saveEmailSettings(){
     }).catch(e => console.warn('[Settings] Firestore save error:', e));
   }
 
-  // ── Step 6: Re-init MSAL with new credentials and update badge ───────
+  // ── Step 6: Show confirmation ────────────────────────────────────────
+  const transport = emailTransport();
   if(clientId && tenantId){
-    // Try to reinitialise immediately and check for cached accounts
-    const app = getMsalApp();
-    if(app){
-      const accounts = app.getAllAccounts();
-      if(accounts.length > 0){
-        updateMsalStatusBadge('signed-in', accounts[0].username);
-      } else {
-        updateMsalStatusBadge('signed-out');
-      }
-    }
+    toast('✅ Client ID & Tenant ID saved! Click "Sign In with Microsoft" to authorize.');
+    // Update sign-in button label
     const signinBtn = document.getElementById('msal-signin-btn');
     if(signinBtn && signinBtn.textContent.includes('Sign In')){ signinBtn.style.boxShadow = '0 0 0 2px var(--green)'; }
-    toast('✅ Settings saved! Click "Sign In with Microsoft" to authorize.');
-  } else if(ejsService && ejsTemplate && ejsKey){
+  } else if(transport === 'emailjs'){
     toast('✅ EmailJS settings saved.');
   } else {
     toast('⚠ Settings saved — no email transport configured yet.', 'var(--amber)');
@@ -2573,19 +2561,6 @@ async function sendTestMail(){
     if(s){s.textContent='⚠ No email provider configured';s.style.color='var(--amber)';}
     return;
   }
-  // Early check: if MS Graph is configured, make sure user is signed in
-  if(transport === 'msgraph'){
-    const app = getMsalApp();
-    if(!app || app.getAllAccounts().length === 0){
-      const s=document.getElementById('test-mail-status');
-      const msg = '⚠ Not signed in to Microsoft — click "Sign In with Microsoft" first';
-      toast(msg,'var(--amber)');
-      if(s){s.textContent=msg;s.style.color='var(--amber)';}
-      updateMsalStatusBadge('signed-out');
-      setTimeout(()=>document.getElementById('msal-signin-btn')?.scrollIntoView({behavior:'smooth',block:'center'}),200);
-      return;
-    }
-  }
   const testEmail = (document.getElementById('ms-test-email')?.value?.trim()) || localStorage.getItem('ms_test_email') || '';
   if(!testEmail){ toast('Enter a Test Email address first','var(--amber)'); return; }
 
@@ -2593,6 +2568,9 @@ async function sendTestMail(){
   const status=document.getElementById('test-mail-status');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Sending…'; }
   if(status){ status.textContent='Connecting to '+transport+'…'; status.style.color='var(--text3)'; }
+
+  // Reset MSAL for fresh credential pickup
+  _msalApp = null;
 
   const fakeTask={
     assignee:testEmail, title:'✅ Test — POLYPLASTICS Task Manager',
@@ -3903,49 +3881,23 @@ function renderMyTasks(){
     <div style="font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--text);margin-bottom:4px;">My Tasks</div>
     <div style="font-size:13px;color:var(--text3);margin-bottom:22px;">Tasks assigned to <strong style="color:var(--accent)">${esc(ownerEmails.join(', '))}</strong></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin-bottom:22px;">
-      ${[['Total',myT.length,'var(--accent)'],['To Do',todo.length,'var(--text2)'],['In Progress',inprog.length,'var(--cyan)'],['Review',review.length,'var(--purple)'],['Done',done.length,'var(--green)'],['Overdue',overdue.length,'var(--red)']].map(([l,v,col])=>`
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;">
+      ${[['Total','all',myT.length,'var(--accent)','📋'],['To Do','To Do',todo.length,'var(--text3)','📌'],['In Progress','In Progress',inprog.length,'var(--cyan)','⚡'],['Review','Review',review.length,'var(--purple)','👁'],['Done','Done',done.length,'var(--green)','✅'],['Overdue','overdue',overdue.length,'var(--red)','🚨']].map(([l,f,v,col,icon])=>`
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s;" onclick="filterMyTasks('${f}')"
+           onmouseover="this.style.borderColor='${col}';this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)';this.style.transform=''">
+        <div style="font-size:18px;margin-bottom:4px;">${icon}</div>
         <div style="font-size:22px;font-weight:800;color:${col}">${v}</div>
         <div style="font-size:11px;color:var(--text3);font-weight:600;margin-top:2px;">${l}</div>
       </div>`).join('')}
     </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:12px;color:var(--text3);">Showing:</span>
+        <span id="mytasks-filter-label" style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:10px;background:rgba(91,141,238,.12);color:var(--accent);">All</span>
+      </div>
       <button class="btn btn-primary" onclick="openSelfTaskModal()">+ Add My Task</button>
     </div>
     <div id="my-task-list"></div>`;
-    // Render rows using plant owner emails
-    const el=document.getElementById('my-task-list');
-    if(!el) return;
-    const STATUS_COL={'To Do':'var(--text3)','In Progress':'var(--cyan)','Review':'var(--purple)','Done':'var(--green)'};
-    const sorted=[...myT].sort((a,b)=>{
-      const ao=isOverdue(a)?0:(['To Do','In Progress','Review','Done'].indexOf(a.status)+1||9);
-      const bo=isOverdue(b)?0:(['To Do','In Progress','Review','Done'].indexOf(b.status)+1||9);
-      return ao-bo||(a.due||'').localeCompare(b.due||'');
-    });
-    if(!sorted.length){
-      el.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text3);">No tasks assigned to you yet.</div>`;
-      return;
-    }
-    el.innerHTML=sorted.map(t=>{
-      const ov=isOverdue(t);
-      const col=ov?'var(--red)':(STATUS_COL[t.status]||'var(--text3)');
-      return `<div class="task-row" style="border-left:3px solid ${col}">
-        <div class="task-row-body">
-          <div class="task-title">${esc(t.title)}</div>
-          <div class="task-meta">
-            <span style="color:${col};font-weight:600;">${ov?'⚠ OVERDUE':t.status}</span>
-            <span>👤 ${esc(t.assignee)}</span>
-            <span>📅 ${fmt(t.due)}</span>
-            <span>${(PRIO_ICONS&&PRIO_ICONS[t.priority])||''} ${t.priority}</span>
-            ${t.tags&&t.tags.length?`<span>🏷 ${t.tags.join(', ')}</span>`:''}
-          </div>
-        </div>
-        <div class="task-actions">
-          <button class="btn btn-ghost btn-sm" style="color:var(--cyan)" title="Next status" onclick="quickStatusCycle('${t.id}')">▶</button>
-          <button class="btn btn-ghost btn-sm" onclick="openDrawer('${t.id}')">👁</button>
-        </div>
-      </div>`;
-    }).join('');
+    renderMyTaskList(selfEmail, 'all');
     return;
   }
 
@@ -3989,53 +3941,116 @@ function renderMyTasks(){
   </div>`:''}
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin-bottom:22px;">
-    ${[['Total',myT.length,'var(--accent)'],['To Do',todo.length,'var(--text2)'],['In Progress',inprog.length,'var(--cyan)'],['Review',review.length,'var(--purple)'],['Done',done.length,'var(--green)'],['Overdue',overdue.length,'var(--red)']].map(([l,v,col])=>`
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;">
+    ${[['Total','all',myT.length,'var(--accent)','📋'],['To Do','To Do',todo.length,'var(--text3)','📌'],['In Progress','In Progress',inprog.length,'var(--cyan)','⚡'],['Review','Review',review.length,'var(--purple)','👁'],['Done','Done',done.length,'var(--green)','✅'],['Overdue','overdue',overdue.length,'var(--red)','🚨']].map(([l,f,v,col,icon])=>`
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s;" onclick="filterMyTasks('${f}')"
+         onmouseover="this.style.borderColor='${col}';this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)';this.style.transform=''">
+      <div style="font-size:18px;margin-bottom:4px;">${icon}</div>
       <div style="font-size:22px;font-weight:800;color:${col}">${v}</div>
       <div style="font-size:11px;color:var(--text3);font-weight:600;margin-top:2px;">${l}</div>
     </div>`).join('')}
   </div>
 
-  <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:12px;color:var(--text3);">Showing:</span>
+      <span id="mytasks-filter-label" style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:10px;background:rgba(91,141,238,.12);color:var(--accent);">All</span>
+    </div>
     <button class="btn btn-primary" onclick="openSelfTaskModal()">+ Add My Task</button>
   </div>
   <div id="my-task-list"></div>`;
 
-  renderMyTaskList(selfEmail);
+  renderMyTaskList(selfEmail, 'all');
 }
 
-function renderMyTaskList(selfEmail){
+function filterMyTasks(filter){
+  // Determine current email
+  let selfEmail;
+  if(plantOwnerAuthenticated && currentPlantSession){
+    selfEmail = (currentPlantSession.owners||[])[0] || '';
+  } else {
+    selfEmail = mode==='user' ? (userEmail||'') : (localStorage.getItem('self_email')||'');
+  }
+  // Update the filter label pill
+  const lbl = document.getElementById('mytasks-filter-label');
+  const PILL_CONFIG = {
+    'all':         {text:'All',          bg:'rgba(91,141,238,.12)',   color:'var(--accent)'},
+    'To Do':       {text:'To Do',        bg:'rgba(156,163,176,.12)', color:'var(--text2)'},
+    'In Progress': {text:'In Progress',  bg:'rgba(34,211,238,.12)',  color:'var(--cyan)'},
+    'Review':      {text:'Review',       bg:'rgba(167,139,250,.15)', color:'var(--purple)'},
+    'Done':        {text:'Done',         bg:'rgba(52,211,153,.13)',  color:'var(--green)'},
+    'overdue':     {text:'Overdue',      bg:'rgba(248,113,113,.15)', color:'var(--red)'},
+  };
+  if(lbl){
+    const cfg = PILL_CONFIG[filter] || PILL_CONFIG['all'];
+    lbl.textContent = cfg.text;
+    lbl.style.background = cfg.bg;
+    lbl.style.color = cfg.color;
+  }
+  renderMyTaskList(selfEmail, filter);
+}
+
+function renderMyTaskList(selfEmail, filter='all'){
   const el=document.getElementById('my-task-list');
   if(!el) return;
-  const STATUS_COL={'To Do':'var(--text3)','In Progress':'var(--cyan)','Review':'var(--purple)','Done':'var(--green)'};
-  const myT=tasks.filter(t=>t.assignee.toLowerCase()===(selfEmail||'').toLowerCase())
-    .sort((a,b)=>{
-      const ao=isOverdue(a)?0:(['To Do','In Progress','Review','Done'].indexOf(a.status)+1||9);
-      const bo=isOverdue(b)?0:(['To Do','In Progress','Review','Done'].indexOf(b.status)+1||9);
-      return ao-bo||(a.due||'').localeCompare(b.due||'');
-    });
-  if(!myT.length){
-    el.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text3);">No tasks yet. Click <strong>+ Add My Task</strong> to create one.</div>`;
+
+  // Gather all tasks for this user
+  let allMyT;
+  if(plantOwnerAuthenticated && currentPlantSession){
+    const ownerEmails=(currentPlantSession.owners||[]).map(o=>o.toLowerCase());
+    allMyT = tasks.filter(t=>ownerEmails.includes((t.assignee||'').toLowerCase()));
+  } else {
+    allMyT = tasks.filter(t=>t.assignee.toLowerCase()===(selfEmail||'').toLowerCase());
+  }
+
+  // Apply filter
+  let filtered;
+  if(filter==='overdue')       filtered = allMyT.filter(t=>isOverdue(t));
+  else if(filter==='all')      filtered = allMyT;
+  else                         filtered = allMyT.filter(t=>t.status===filter);
+
+  // Sort: overdue first, then by status order, then by due date
+  filtered = [...filtered].sort((a,b)=>{
+    const ao=isOverdue(a)?0:(['To Do','In Progress','Review','Done'].indexOf(a.status)+1||9);
+    const bo=isOverdue(b)?0:(['To Do','In Progress','Review','Done'].indexOf(b.status)+1||9);
+    return ao-bo||(a.due||'').localeCompare(b.due||'');
+  });
+
+  if(!filtered.length){
+    const emptyMsgs = {
+      'all':'No tasks assigned to you yet. Click <strong>+ Add My Task</strong> to create one.',
+      'To Do':'No To Do tasks — you\'re all caught up! 🎉',
+      'In Progress':'No tasks currently in progress.',
+      'Review':'No tasks pending review.',
+      'Done':'No completed tasks yet. Keep going! 💪',
+      'overdue':'No overdue tasks — great work! ✅',
+    };
+    el.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text3);">${emptyMsgs[filter]||'No tasks match this filter.'}</div>`;
     return;
   }
-  el.innerHTML=myT.map(t=>{
+
+  const STATUS_COL={'To Do':'var(--text3)','In Progress':'var(--cyan)','Review':'var(--purple)','Done':'var(--green)'};
+  const isPlantOwner = plantOwnerAuthenticated && currentPlantSession;
+
+  el.innerHTML=filtered.map(t=>{
     const ov=isOverdue(t);
     const col=ov?'var(--red)':(STATUS_COL[t.status]||'var(--text3)');
-    return `<div class="task-row" style="border-left:3px solid ${col}">
+    return `<div class="task-row" style="border-left:3px solid ${col};cursor:pointer" onclick="openDrawer('${t.id}')">
       <div class="task-row-body">
         <div class="task-title">${esc(t.title)}</div>
         <div class="task-meta">
           <span style="color:${col};font-weight:600;">${ov?'⚠ OVERDUE':t.status}</span>
-          <span>📅 ${fmt(t.due)}</span>
+          ${isPlantOwner?`<span>👤 ${esc(t.assignee)}</span>`:''}
+          <span>📅 <span style="color:${ov?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
           <span>${(PRIO_ICONS&&PRIO_ICONS[t.priority])||''} ${t.priority}</span>
+          ${t.completedDate?`<span style="color:var(--green);font-weight:600">✅ ${fmt(t.completedDate)}</span>`:''}
           ${t.tags&&t.tags.length?`<span>🏷 ${t.tags.join(', ')}</span>`:''}
         </div>
       </div>
-      <div class="task-actions">
-        <button class="btn btn-ghost btn-sm" title="Edit" onclick="openSelfTaskModal('${t.id}')">✏</button>
+      <div class="task-actions" onclick="event.stopPropagation()">
+        ${!isPlantOwner?`<button class="btn btn-ghost btn-sm" title="Edit" onclick="openSelfTaskModal('${t.id}')">✏</button>`:''}
         <button class="btn btn-ghost btn-sm" style="color:var(--cyan)" title="Next status" onclick="quickStatusCycle('${t.id}')">▶</button>
         <button class="btn btn-ghost btn-sm" onclick="openDrawer('${t.id}')">👁</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteMyTask('${t.id}')">🗑</button>
+        ${!isPlantOwner?`<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteMyTask('${t.id}')">🗑</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -4055,10 +4070,20 @@ function quickStatusCycle(id){
   const t=getTask(id); if(!t) return;
   const cycle=['To Do','In Progress','Review','Done'];
   const next=cycle[(cycle.indexOf(t.status)+1)%cycle.length];
-  const completedDate = next==='Done' ? today() : (next!=='Done' ? '' : t.completedDate);
+  const completedDate = next==='Done' ? today() : '';
   updateTask({...t,status:next,completedDate});
   toast('Status → '+next);
-  showPanel('mytasks');
+  // Re-render task list preserving current filter
+  const lbl = document.getElementById('mytasks-filter-label');
+  const LABEL_TO_FILTER = {'All':'all','To Do':'To Do','In Progress':'In Progress','Review':'Review','Done':'Done','Overdue':'overdue'};
+  const currentFilter = lbl ? (LABEL_TO_FILTER[lbl.textContent] || 'all') : 'all';
+  if(document.getElementById('my-task-list')){
+    const se = plantOwnerAuthenticated&&currentPlantSession ? ((currentPlantSession.owners||[])[0]||'') : (mode==='user'?(userEmail||''):(localStorage.getItem('self_email')||''));
+    renderMyTaskList(se, currentFilter);
+    refreshOverdueBadge();
+  } else {
+    showPanel('mytasks');
+  }
 }
 
 function deleteMyTask(id){
@@ -4066,8 +4091,13 @@ function deleteMyTask(id){
   tasks=tasks.filter(t=>t.id!==id);
   localStorage.setItem('tf_tasks',JSON.stringify(tasks));
   if(_fbReady&&_db) _db.collection('tasks').doc(id).delete().catch(e=>console.warn('deleteMyTask error',e));
-  const se=mode==='user'?(userEmail||''):(plantOwnerAuthenticated?'':(localStorage.getItem('self_email')||''));
-  renderMyTaskList(se); refreshOverdueBadge(); toast('Deleted');
+  const lbl = document.getElementById('mytasks-filter-label');
+  const LABEL_TO_FILTER = {'All':'all','To Do':'To Do','In Progress':'In Progress','Review':'Review','Done':'Done','Overdue':'overdue'};
+  const currentFilter = lbl ? (LABEL_TO_FILTER[lbl.textContent] || 'all') : 'all';
+  const se = mode==='user'?(userEmail||''):(plantOwnerAuthenticated?((currentPlantSession?.owners||[])[0]||''):(localStorage.getItem('self_email')||''));
+  renderMyTaskList(se, currentFilter);
+  refreshOverdueBadge();
+  toast('Deleted');
 }
 
 function openSelfTaskModal(editId){
@@ -4142,7 +4172,11 @@ function saveSelfTask(editId,selfEmail){
     if(_fbReady&&_db) _db.collection('tasks').doc(nt.id).set(nt).catch(e=>console.warn('saveSelfTask error',e));
     toast('Task added ✅ — no email sent');
   }
-  closeSelfTaskModal(); refreshOverdueBadge(); renderMyTaskList(selfEmail);
+  closeSelfTaskModal(); refreshOverdueBadge();
+  const lbl2 = document.getElementById('mytasks-filter-label');
+  const LABEL_TO_FILTER2 = {'All':'all','To Do':'To Do','In Progress':'In Progress','Review':'Review','Done':'Done','Overdue':'overdue'};
+  const currentFilter2 = lbl2 ? (LABEL_TO_FILTER2[lbl2.textContent] || 'all') : 'all';
+  renderMyTaskList(selfEmail, currentFilter2);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -4611,39 +4645,16 @@ function goToTasksFiltered(status, priority){
 }
 
 
-// ── Navigate to tasks filtered by admin's own email ───────────────────
+// ── Navigate dashboard My Tasks stat → filtered My Tasks panel ───────
 function goToMyTasksFiltered(){
-  // Plant owner: filter by plant owner emails
+  const selfEmail = mode==='user' ? (userEmail||'') : (localStorage.getItem('self_email')||'');
   if(plantOwnerAuthenticated && currentPlantSession){
-    const ownerEmails=(currentPlantSession.owners||[]);
-    const search = ownerEmails.length ? ownerEmails[0] : '';
-    taskFilters = {status:'All', priority:'All', search: search, overdue:false};
-    currentPanel = 'tasks';
-    document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
-    const hit=document.querySelector('.nav-item[onclick*="tasks"]');
-    if(hit) hit.classList.add('active');
-    document.getElementById('btn-new-task').style.display='flex';
-    document.getElementById('btn-bulk-upload').style.display='flex';
-    document.getElementById('btn-export').style.display='flex';
-    document.getElementById('topbar-title').textContent='All Tasks';
-    renderTasks();
+    showPanel('mytasks');
     return;
   }
-  // Admin: filter by self_email identity
-  const selfEmail = localStorage.getItem('self_email') || '';
   if(selfEmail){
-    taskFilters = {status:'All', priority:'All', search: selfEmail, overdue:false};
-    currentPanel = 'tasks';
-    document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
-    const hit=document.querySelector('.nav-item[onclick*="tasks"]');
-    if(hit) hit.classList.add('active');
-    document.getElementById('btn-new-task').style.display='flex';
-    document.getElementById('btn-bulk-upload').style.display='flex';
-    document.getElementById('btn-export').style.display='flex';
-    document.getElementById('topbar-title').textContent='All Tasks';
-    renderTasks();
+    showPanel('mytasks');
   } else {
-    // No identity set — go to My Tasks to set one
     showPanel('mytasks');
   }
 }
