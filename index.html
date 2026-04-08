@@ -7,7 +7,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<!-- Microsoft MSAL – Azure AD / Microsoft Graph token acquisition -->
+<script src="https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"
+  onerror="console.error('❌ MSAL failed to load from unpkg. Trying jsDelivr fallback…');
+           var s=document.createElement('script');
+           s.src='https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js';
+           document.head.appendChild(s);"></script>
 <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root {
@@ -1608,8 +1613,8 @@ function renderSettings(){
         ${(()=>{
           const t=emailTransport();
           if(t==='msgraph'){
-            const app=getMsalApp();
-            const signedIn = app && app.getAllAccounts().length > 0;
+            const inst=getMsalInstance();
+            const signedIn = inst && inst.getAllAccounts().length > 0;
             return signedIn
               ? '<span style="color:var(--green);font-weight:600;margin-left:8px">✅ Microsoft Graph active &amp; signed in</span>'
               : '<span style="color:var(--amber);font-weight:600;margin-left:8px">⚠ IDs saved — sign in with Microsoft below to activate</span>';
@@ -1646,7 +1651,20 @@ function renderSettings(){
           <div><strong style="color:var(--text2)">Currently saved in browser:</strong></div>
           <div>Client ID: <span id="ms-saved-client-id-display" style="color:${localStorage.getItem('ms_client_id')?'var(--green)':'var(--red)'}">${localStorage.getItem('ms_client_id') || '❌ not saved yet'}</span></div>
           <div>Tenant ID: <span id="ms-saved-tenant-id-display" style="color:${localStorage.getItem('ms_tenant_id')?'var(--green)':'var(--red)'}">${localStorage.getItem('ms_tenant_id') || '❌ not saved yet'}</span></div>
-          <div style="margin-top:4px"><button class="btn btn-danger btn-sm" style="font-size:10px;padding:3px 10px" onclick="localStorage.removeItem('ms_client_id');localStorage.removeItem('ms_tenant_id');_msalApp=null;_msalSignedIn=false;document.getElementById('ms-client-id').value='';document.getElementById('ms-tenant-id').value='';document.getElementById('ms-saved-client-id-display').textContent='❌ not saved yet';document.getElementById('ms-saved-client-id-display').style.color='var(--red)';document.getElementById('ms-saved-tenant-id-display').textContent='❌ not saved yet';document.getElementById('ms-saved-tenant-id-display').style.color='var(--red)';toast('Cleared — enter your IDs and save','var(--amber)')">🗑 Clear Saved IDs</button></div>
+          <div style="margin-top:4px"><button class="btn btn-danger btn-sm" style="font-size:10px;padding:3px 10px" onclick="
+            const oldKey=(localStorage.getItem('ms_client_id')||'')+'::' +(localStorage.getItem('ms_tenant_id')||'');
+            delete _msalInstances[oldKey];
+            _msalSignedIn=false;
+            localStorage.removeItem('ms_client_id');
+            localStorage.removeItem('ms_tenant_id');
+            document.getElementById('ms-client-id').value='';
+            document.getElementById('ms-tenant-id').value='';
+            document.getElementById('ms-saved-client-id-display').textContent='❌ not saved yet';
+            document.getElementById('ms-saved-client-id-display').style.color='var(--red)';
+            document.getElementById('ms-saved-tenant-id-display').textContent='❌ not saved yet';
+            document.getElementById('ms-saved-tenant-id-display').style.color='var(--red)';
+            updateMsalStatusBadge('signed-out');
+            toast('Cleared — enter your IDs and save','var(--amber)')">🗑 Clear Saved IDs</button></div>
         </div>
 
         <!-- Microsoft Sign-In Status -->
@@ -1835,10 +1853,10 @@ function renderSettings(){
   // render plant list and update MSAL sign-in status after innerHTML is set
   setTimeout(()=>{
     renderPgList();
-    // Update Microsoft sign-in status badge
-    const app = getMsalApp();
-    if(app){
-      const accounts = app.getAllAccounts();
+    // Update Microsoft sign-in status badge using singleton instance
+    const inst = getMsalInstance();
+    if(inst){
+      const accounts = inst.getAllAccounts();
       if(accounts.length > 0) updateMsalStatusBadge('signed-in', accounts[0].username);
       else updateMsalStatusBadge('signed-out');
     } else {
@@ -2010,7 +2028,7 @@ function saveEmailSettings(){
   const ejsTemplate = (document.getElementById('ejs-template-id')?.value||'').trim();
   const ejsKey      = (document.getElementById('ejs-public-key')?.value||'').trim();
 
-  // ── Step 1: Write to localStorage immediately ───────────────────────
+  // ── Step 1: Write to localStorage ──────────────────────────────────────
   localStorage.setItem('ms_client_id',       clientId);
   localStorage.setItem('ms_tenant_id',       tenantId);
   localStorage.setItem('ms_test_email',      testEmail);
@@ -2019,23 +2037,36 @@ function saveEmailSettings(){
   localStorage.setItem('ejs_template_id',    ejsTemplate);
   localStorage.setItem('ejs_public_key',     ejsKey);
 
-  // ── Step 2: Verify write actually landed (read back immediately) ────
+  // ── Step 2: Verify and update display ──────────────────────────────────
   const verifyId  = localStorage.getItem('ms_client_id');
   const verifyTen = localStorage.getItem('ms_tenant_id');
   console.log('[Settings] Saved Client ID:', verifyId);
   console.log('[Settings] Saved Tenant ID:', verifyTen);
-
-  // ── Step 3: Update the in-page status display without full re-render ─
   const cidStatus = document.getElementById('ms-saved-client-id-display');
   const tidStatus = document.getElementById('ms-saved-tenant-id-display');
   if(cidStatus){ cidStatus.textContent = verifyId || '❌ not saved'; cidStatus.style.color = verifyId ? 'var(--green)' : 'var(--red)'; }
   if(tidStatus){ tidStatus.textContent = verifyTen || '❌ not saved'; tidStatus.style.color = verifyTen ? 'var(--green)' : 'var(--red)'; }
 
-  // ── Step 4: Reset MSAL so new credentials take effect ───────────────
-  _msalApp = null;
-  _msalSignedIn = false;
+  // ── Step 3: IMPORTANT — do NOT clear _msalInstances or the singleton cache.
+  //    The singleton keyed by clientId::tenantId is safe to keep — if credentials
+  //    changed the new key produces a fresh instance automatically on next use.
+  //    Clearing would destroy the cached token and force re-login unnecessarily.
+  _msalSignedIn = false; // reset local flag only; actual state comes from getAllAccounts()
 
-  // ── Step 5: Persist to Firestore ────────────────────────────────────
+  // ── Step 4: Check if already signed in with the new credentials ─────────
+  const newKey = clientId && tenantId ? `${clientId}::${tenantId}` : null;
+  if(newKey && _msalInstances[newKey]){
+    const accounts = _msalInstances[newKey].getAllAccounts();
+    if(accounts.length > 0){
+      updateMsalStatusBadge('signed-in', accounts[0].username);
+    } else {
+      updateMsalStatusBadge('signed-out');
+    }
+  } else {
+    updateMsalStatusBadge('signed-out');
+  }
+
+  // ── Step 5: Persist to Firestore ────────────────────────────────────────
   if(_fbReady && _db){
     _db.collection('settings').doc('msgraph').set(
       {clientId, tenantId, testEmail, adminNotifyEmail, ejsService, ejsTemplate, ejsKey},
@@ -2045,14 +2076,15 @@ function saveEmailSettings(){
     }).catch(e => console.warn('[Settings] Firestore save error:', e));
   }
 
-  // ── Step 6: Show confirmation ────────────────────────────────────────
-  const transport = emailTransport();
+  // ── Step 6: Confirmation toast ───────────────────────────────────────────
   if(clientId && tenantId){
-    toast('✅ Client ID & Tenant ID saved! Click "Sign In with Microsoft" to authorize.');
-    // Update sign-in button label
+    const alreadyIn = newKey && _msalInstances[newKey] && _msalInstances[newKey].getAllAccounts().length > 0;
+    toast(alreadyIn
+      ? '✅ Settings saved — already signed in to Microsoft!'
+      : '✅ Settings saved! Click "Sign In with Microsoft" to authorize.');
     const signinBtn = document.getElementById('msal-signin-btn');
-    if(signinBtn && signinBtn.textContent.includes('Sign In')){ signinBtn.style.boxShadow = '0 0 0 2px var(--green)'; }
-  } else if(transport === 'emailjs'){
+    if(signinBtn && !alreadyIn){ signinBtn.style.boxShadow = '0 0 0 2px var(--green)'; }
+  } else if(ejsService && ejsTemplate && ejsKey){
     toast('✅ EmailJS settings saved.');
   } else {
     toast('⚠ Settings saved — no email transport configured yet.', 'var(--amber)');
@@ -2112,52 +2144,84 @@ function withTimeout(promise, ms=18000){
     new Promise((_,rej)=>setTimeout(()=>rej(new Error('Timeout')),ms))]);
 }
 
-// ── MSAL (Microsoft Graph) ─────────────────────────────────────────────
-let _msalApp = null;
-let _msalInitPromise = null; // ensures handleRedirectPromise is called once
+// ══════════════════════════════════════════════════════════════════════
+//  MSAL (Microsoft Graph) — Singleton pattern (ported from Legal app)
+//
+//  KEY FIXES vs old implementation:
+//  1. Singleton cache keyed by clientId+tenantId — prevents token-cache
+//     conflicts and "interaction_in_progress" errors from multiple instances
+//  2. await inst.initialize() — required for correct MSAL v2 operation
+//  3. Short-form scopes ['Mail.Send','User.Read'] — more reliable than full URLs
+//  4. CDN changed to unpkg + jsDelivr fallback (alcdn.msauth.net was unreliable)
+//  5. _msalSignedIn state tracked via singleton accounts check, not a flag
+//     that gets wiped when settings are saved
+// ══════════════════════════════════════════════════════════════════════
 
-function getMsalApp(){
-  const c = getEmailConfig();
-  if(!c.clientId || !c.tenantId) return null;
-  if(typeof msal === 'undefined'){
-    console.warn('MSAL library not loaded');
-    return null;
+// Singleton cache: one MSAL instance per clientId+tenantId pair.
+// Never recreated on credential save — preserves cached tokens.
+const _msalInstances = {};
+
+/**
+ * getMSGraphToken(cfg)
+ * Acquires a delegated Mail.Send token via silent→popup flow.
+ * cfg = { clientId, tenantId }  (from getEmailConfig())
+ */
+async function getMSGraphToken(cfg) {
+  if (typeof msal === 'undefined') {
+    throw new Error(
+      'MS_LOAD_ERROR: MSAL library failed to load. Check your internet connection and refresh. ' +
+      'If the problem persists, ensure your network allows access to unpkg.com or cdn.jsdelivr.net.'
+    );
   }
-  if(!_msalApp){
-    try{
-      _msalApp = new msal.PublicClientApplication({
-        auth:{ clientId:c.clientId,
-               authority:'https://login.microsoftonline.com/'+c.tenantId,
-               redirectUri: window.location.href.split('?')[0] },
-        cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:true }
-      });
-    }catch(e){ console.error('MSAL init error:',e); return null; }
+  if (!cfg.clientId || !cfg.tenantId) {
+    throw new Error('MS_NOT_CONFIGURED: Enter your Azure Client ID & Tenant ID in Settings → Email Integration, then save.');
   }
-  return _msalApp;
+
+  // Redirect URI: full page URL, no hash/query — must match Azure AD App Registration exactly
+  const redirectUri = window.location.href.split('?')[0].split('#')[0];
+  const cacheKey    = `${cfg.clientId}::${cfg.tenantId}`;
+
+  if (!_msalInstances[cacheKey]) {
+    const inst = new msal.PublicClientApplication({
+      auth: {
+        clientId:    cfg.clientId,
+        authority:   `https://login.microsoftonline.com/${cfg.tenantId}`,
+        redirectUri,
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+    });
+    // initialize() is required in MSAL v2 before any interactive calls
+    await inst.initialize();
+    _msalInstances[cacheKey] = inst;
+    console.log(`🔑 [MSAL] Instance created — redirectUri: ${redirectUri}`);
+  }
+
+  const inst    = _msalInstances[cacheKey];
+  const request = { scopes: ['Mail.Send', 'User.Read'] };
+  const accounts = inst.getAllAccounts();
+
+  // Silent first (uses cached token — no popup)
+  if (accounts.length > 0) {
+    try {
+      const silent = await inst.acquireTokenSilent({ ...request, account: accounts[0] });
+      return silent.accessToken;
+    } catch (_) { /* token expired or interaction required — fall through to popup */ }
+  }
+
+  // Interactive popup login
+  const popup = await inst.loginPopup(request);
+  return popup.accessToken;
 }
 
-// Handle redirect response on page load (called once at startup)
-async function handleMsalRedirect(){
-  const app = getMsalApp();
-  if(!app) return;
-  try{
-    const result = await app.handleRedirectPromise();
-    if(result && result.accessToken){
-      console.log('[MSAL] Redirect sign-in success:', result.account?.username);
-      _msalSignedIn = true;
-      updateMsalStatusBadge('signed-in', result.account?.username);
-    } else {
-      const accounts = app.getAllAccounts();
-      if(accounts.length > 0){
-        _msalSignedIn = true;
-        updateMsalStatusBadge('signed-in', accounts[0].username);
-      } else {
-        updateMsalStatusBadge('signed-out');
-      }
-    }
-  }catch(e){
-    console.warn('[MSAL] handleRedirectPromise error:', e.message);
-  }
+/**
+ * getMsalInstance()
+ * Returns the cached MSAL instance for the current credentials, or null.
+ * Used by the Settings UI status badge.
+ */
+function getMsalInstance() {
+  const c = getEmailConfig();
+  if (!c.clientId || !c.tenantId) return null;
+  return _msalInstances[`${c.clientId}::${c.tenantId}`] || null;
 }
 
 let _msalSignedIn = false;
@@ -2169,13 +2233,13 @@ function updateMsalStatusBadge(state, username=''){
   if(!dot) return;
   if(state === 'signed-in'){
     dot.style.background = 'var(--green)';
-    dot.style.boxShadow = '0 0 6px var(--green)';
+    dot.style.boxShadow  = '0 0 6px var(--green)';
     if(lbl) lbl.textContent = '✅ Signed in as: ' + username;
     if(btn){ btn.textContent = '⎋ Sign Out'; btn.onclick = msalSignOut; }
     _msalSignedIn = true;
   } else {
     dot.style.background = 'var(--amber)';
-    dot.style.boxShadow = '0 0 6px var(--amber)';
+    dot.style.boxShadow  = '0 0 6px var(--amber)';
     if(lbl) lbl.textContent = '⚠ Not signed in — click "Sign In with Microsoft" to authorize';
     if(btn){ btn.textContent = '🔑 Sign In with Microsoft'; btn.onclick = msalSignIn; }
     _msalSignedIn = false;
@@ -2183,98 +2247,101 @@ function updateMsalStatusBadge(state, username=''){
 }
 
 async function msalSignIn(){
-  const app = getMsalApp();
-  if(!app){ toast('Configure Client ID & Tenant ID in Settings first','var(--amber)'); return; }
+  const c = getEmailConfig();
+  if(!c.clientId || !c.tenantId){
+    toast('Enter and save your Azure Client ID & Tenant ID in Settings first','var(--amber)');
+    return;
+  }
   const btn = document.getElementById('msal-signin-btn');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Opening Microsoft login…'; }
   try{
-    // Try silent first (already have a cached account)
-    const accounts = app.getAllAccounts();
-    if(accounts.length > 0){
-      try{
-        await app.acquireTokenSilent({ scopes:['https://graph.microsoft.com/Mail.Send'], account:accounts[0] });
-        updateMsalStatusBadge('signed-in', accounts[0].username);
-        toast('✅ Already signed in as '+accounts[0].username);
-        if(btn){ btn.disabled=false; }
-        return;
-      }catch(silentErr){
-        // silent failed — fall through to interactive
-      }
+    const token = await getMSGraphToken(c);
+    if(token){
+      const inst     = getMsalInstance();
+      const accounts = inst ? inst.getAllAccounts() : [];
+      const username = accounts.length ? accounts[0].username : c.clientId;
+      updateMsalStatusBadge('signed-in', username);
+      toast('✅ Signed in to Microsoft — emails will send automatically');
     }
-    // Try popup first — works when page is served over http/https
-    try{
-      const r = await app.loginPopup({ scopes:['https://graph.microsoft.com/Mail.Send'], prompt:'select_account' });
-      if(r && r.account){
-        _msalSignedIn = true;
-        updateMsalStatusBadge('signed-in', r.account.username);
-        toast('✅ Signed in as '+r.account.username);
-        if(btn){ btn.disabled=false; }
-        return;
-      }
-    }catch(popupErr){
-      // Popup blocked or not supported — fall through to redirect
-      if(popupErr.errorCode === 'popup_window_error' || popupErr.message?.includes('popup')){
-        console.warn('[MSAL] Popup blocked, trying redirect…');
-      } else {
-        // Real auth error (user cancelled, etc.)
-        if(btn){ btn.disabled=false; btn.textContent='🔑 Sign In with Microsoft'; }
-        toast('Sign-in cancelled or failed: '+popupErr.message,'var(--amber)');
-        return;
-      }
-    }
-    // Fallback to redirect flow
-    await app.loginRedirect({ scopes:['https://graph.microsoft.com/Mail.Send'], prompt:'select_account' });
   }catch(e){
-    if(btn){ btn.disabled=false; btn.textContent='🔑 Sign In with Microsoft'; }
     console.error('[MSAL] Sign-in error:', e.message);
     const isFileProtocol = window.location.protocol === 'file:';
-    const hint = isFileProtocol ? ' Note: Microsoft sign-in requires the file to be served over HTTP/HTTPS, not opened as a local file.' : '';
-    toast('Sign-in failed: '+e.message+hint,'var(--red)');
+    const hint = isFileProtocol ? ' — Note: Microsoft sign-in requires the page to be served over HTTPS, not opened as a local file.' : '';
+    toast('Sign-in failed: ' + e.message.replace('MS_NOT_CONFIGURED: ','') + hint, 'var(--red)');
+  }finally{
+    if(btn){ btn.disabled=false; }
   }
 }
 
 async function msalSignOut(){
-  const app = getMsalApp();
-  if(!app) return;
+  const inst = getMsalInstance();
+  if(!inst){ updateMsalStatusBadge('signed-out'); toast('Signed out from Microsoft'); return; }
   try{
-    const accounts = app.getAllAccounts();
+    const accounts = inst.getAllAccounts();
     if(accounts.length > 0){
-      await app.logoutRedirect({ account: accounts[0], postLogoutRedirectUri: window.location.href.split('?')[0] });
+      // Clear token cache locally — avoid full redirect sign-out (which reloads the page)
+      await inst.clearCache();
     }
   }catch(e){
     console.warn('[MSAL] Sign-out error:', e.message);
-    _msalApp = null; _msalSignedIn = false;
-    updateMsalStatusBadge('signed-out');
-    toast('Signed out from Microsoft');
+  }
+  _msalSignedIn = false;
+  updateMsalStatusBadge('signed-out');
+  toast('Signed out from Microsoft');
+}
+
+/**
+ * getMsAccessToken()
+ * Used internally by sendViaMsGraph and notification functions.
+ */
+async function getMsAccessToken(){
+  const c = getEmailConfig();
+  if(!c.clientId || !c.tenantId){
+    throw new Error('MS_NOT_CONFIGURED: Enter your Azure Client ID & Tenant ID in Settings → Email Integration');
+  }
+  try{
+    return await getMSGraphToken(c);
+  }catch(e){
+    if(e.message && (e.message.includes('interaction_required') || e.message.includes('login_required') || e.message.includes('consent_required'))){
+      throw new Error('MS_NOT_SIGNED_IN: Session expired — go to Settings → Email Integration and click "Sign In with Microsoft" to re-authorize.');
+    }
+    if(e.message && e.message.startsWith('MS_')){
+      throw e; // already formatted
+    }
+    throw new Error('MS_NOT_SIGNED_IN: Microsoft auth failed: ' + e.message);
   }
 }
 
-async function getMsAccessToken(){
-  const app = getMsalApp();
-  if(!app) throw new Error('MSAL not available — check Client ID & Tenant ID in Settings');
-  const scopes = ['https://graph.microsoft.com/Mail.Send'];
-  const accounts = app.getAllAccounts();
-  if(!accounts.length) throw new Error('MS_NOT_SIGNED_IN: Not signed in to Microsoft — go to Settings → Email Integration and click "Sign In with Microsoft"');
+/**
+ * handleMsalRedirect()
+ * Called on page load — checks for cached sign-in and updates status badge.
+ */
+async function handleMsalRedirect(){
+  const c = getEmailConfig();
+  if(!c.clientId || !c.tenantId) return;
   try{
-    const r = await app.acquireTokenSilent({ scopes, account:accounts[0] });
-    return r.accessToken;
+    // Warm up singleton instance to pick up any cached token
+    const cacheKey = `${c.clientId}::${c.tenantId}`;
+    if(!_msalInstances[cacheKey]){
+      const redirectUri = window.location.href.split('?')[0].split('#')[0];
+      const inst = new msal.PublicClientApplication({
+        auth:{ clientId:c.clientId, authority:`https://login.microsoftonline.com/${c.tenantId}`, redirectUri },
+        cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:false },
+      });
+      await inst.initialize();
+      _msalInstances[cacheKey] = inst;
+    }
+    const inst     = _msalInstances[cacheKey];
+    const accounts = inst.getAllAccounts();
+    if(accounts.length > 0){
+      _msalSignedIn = true;
+      updateMsalStatusBadge('signed-in', accounts[0].username);
+      console.log('[MSAL] Restored cached sign-in:', accounts[0].username);
+    } else {
+      updateMsalStatusBadge('signed-out');
+    }
   }catch(e){
-    // Silent failed — check if it's an interaction-required error
-    const isInteractionRequired = e.name === 'InteractionRequiredAuthError' ||
-      (e.message && (e.message.includes('interaction_required') || e.message.includes('consent_required') || e.message.includes('login_required')));
-    if(isInteractionRequired && window.location.protocol !== 'file:'){
-      // Try popup for token refresh (works on http/https)
-      try{
-        const r2 = await app.acquireTokenPopup({ scopes });
-        return r2.accessToken;
-      }catch(popupErr){
-        throw new Error('MS_NOT_SIGNED_IN: Token expired — go to Settings → Email Integration and click "Sign In with Microsoft" to re-authorize.');
-      }
-    }
-    if(isInteractionRequired){
-      throw new Error('MS_NOT_SIGNED_IN: Token expired or consent needed — go to Settings → Email Integration and click "Sign In with Microsoft" to re-authorize.');
-    }
-    throw new Error('MS_NOT_SIGNED_IN: Microsoft auth failed: '+e.message+' — Please sign in again from Settings → Email Integration');
+    console.warn('[MSAL] Startup check error:', e.message);
   }
 }
 
@@ -2456,19 +2523,9 @@ function buildEmailSubject(reason, taskTitle, task){
 
 // ── Microsoft Graph send ───────────────────────────────────────────────
 async function sendViaMsGraph(toEmail, subject, htmlBody){
-  const app = getMsalApp();
-  if(!app){
-    const cfg = getEmailConfig();
-    if(!cfg.clientId || !cfg.tenantId){
-      throw new Error('MS_NOT_CONFIGURED: Enter your Azure Client ID & Tenant ID in Settings → Email Integration, then save and sign in.');
-    }
-    throw new Error('MS_NOT_CONFIGURED: MSAL library not ready. Reload the page and try again.');
-  }
-  const accounts = app.getAllAccounts();
-  if(!accounts.length){
-    throw new Error('MS_NOT_SIGNED_IN: Not signed in to Microsoft. Go to Settings → Email Integration and click "Sign In with Microsoft".');
-  }
-  const token = await withTimeout(getMsAccessToken());
+  const cfg = getEmailConfig();
+  // getMSGraphToken handles all cases: not configured, not signed in, token refresh
+  const token = await withTimeout(getMSGraphToken(cfg));
   const res = await withTimeout(fetch('https://graph.microsoft.com/v1.0/me/sendMail',{
     method:'POST',
     headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
@@ -2568,9 +2625,6 @@ async function sendTestMail(){
   const status=document.getElementById('test-mail-status');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Sending…'; }
   if(status){ status.textContent='Connecting to '+transport+'…'; status.style.color='var(--text3)'; }
-
-  // Reset MSAL for fresh credential pickup
-  _msalApp = null;
 
   const fakeTask={
     assignee:testEmail, title:'✅ Test — POLYPLASTICS Task Manager',
@@ -3071,8 +3125,8 @@ async function sendAllReminders(){
     return;
   }
   // Check sign-in before looping
-  const app=getMsalApp();
-  if(!app||!app.getAllAccounts().length){
+  const inst=getMsalInstance();
+  if(!inst||!inst.getAllAccounts().length){
     toast('⚠ Not signed in to Microsoft — go to Settings → Email Integration → Sign In','var(--amber)');
     return;
   }
@@ -5001,7 +5055,7 @@ async function sendReplyNotificationEmail(task, reply){
   if(!adminEmail){ console.warn('Admin notify email not set'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
-    const token = await withTimeout(getMsAccessToken());
+    const token = await withTimeout(getMSGraphToken(cfg));
     const bodyHtml = buildEmailHtml(
       { ...task, assignee: adminEmail, desc: '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)') },
       'updated', taskLink, reply.author + ' replied: ' + (reply.text||'').slice(0,120)
@@ -5033,7 +5087,7 @@ async function sendAdminTaskCreationEmail(task){
   if(!adminEmail){ console.warn('Admin notify email not set — skipping admin creation email'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
-    const token = await withTimeout(getMsAccessToken());
+    const token = await withTimeout(getMSGraphToken(cfg));
     const bodyHtml = buildEmailHtml(
       { ...task, assignee: adminEmail, desc: '📋 New task assigned to: ' + task.assignee + '\n\n' + (task.desc||'No description.') },
       'assigned', taskLink, 'Task created: ' + task.title + ' → assigned to ' + task.assignee
