@@ -681,11 +681,17 @@ function renderDashboard(){
   <div class="panel-title fade-in">Command Centre${plantOwnerAuthenticated&&currentPlantSession?' — 🏭 '+esc(currentPlantSession.name):''}</div>
   <div class="panel-sub">Live overview of ${plantOwnerAuthenticated&&currentPlantSession?'your plant tasks':'all tasks'}, team performance, and deadlines</div>
 
-  <div class="stats-grid fade-in">
+  <div class="stats-grid fade-in" id="dash-stats-grid">
     <div class="stat-card" style="--c:var(--accent);cursor:pointer;" onclick="goToTasksFiltered('All','All')" title="View all tasks">
       <div class="stat-icon">📋</div>
       <div class="stat-value">${total}</div>
       <div class="stat-label">Total Tasks</div>
+    </div>
+    <div class="stat-card" style="--c:var(--purple);cursor:pointer;grid-column:span 1;position:relative;overflow:visible;" id="my-tasks-stat-card" onclick="showPanel('mytasks')" title="View My Tasks">
+      <div class="stat-icon">👤</div>
+      <div class="stat-value" id="dash-my-tasks-val">—</div>
+      <div class="stat-label">My Tasks</div>
+      <div id="dash-my-tasks-sub" style="font-size:10px;color:var(--text3);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
     </div>
     <div class="stat-card" style="--c:var(--purple);cursor:pointer;" onclick="goToTasksFiltered('In Progress','All')" title="View In Progress tasks">
       <div class="stat-icon">⚡</div>
@@ -712,14 +718,6 @@ function renderDashboard(){
       <div class="stat-value">${rate}%</div>
       <div class="stat-label">Completion Rate</div>
     </div>
-  </div>
-
-  <div class="card fade-in" id="dash-my-tasks-block" style="margin-bottom:22px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
-      <div class="section-head" style="margin-bottom:0">👤 My Tasks <span id="dash-my-tasks-count" style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:10px;background:rgba(91,141,238,.12);color:var(--accent);letter-spacing:.4px;vertical-align:middle"></span></div>
-      <button class="btn btn-ghost btn-sm" onclick="showPanel('mytasks')" style="font-size:11px;">View All My Tasks →</button>
-    </div>
-    <div id="dash-my-tasks-list"></div>
   </div>
 
   <div class="charts-grid fade-in" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
@@ -761,45 +759,24 @@ function renderDashboard(){
     <div id="dash-plant-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px"></div>
   </div>`;
 
-  // ── Populate "My Tasks" dashboard block ──────────────────────────────
+  // ── Populate "My Tasks" stat card ────────────────────────────────────
   (()=>{
     const selfEmail = mode==='user' ? (userEmail||'') : (localStorage.getItem('self_email')||'');
-    const myTasksBlock = document.getElementById('dash-my-tasks-block');
-    const myTasksList  = document.getElementById('dash-my-tasks-list');
-    const myTasksCount = document.getElementById('dash-my-tasks-count');
+    const valEl = document.getElementById('dash-my-tasks-val');
+    const subEl = document.getElementById('dash-my-tasks-sub');
     if(!selfEmail){
-      if(myTasksBlock) myTasksBlock.innerHTML = `
-        <div class="section-head" style="margin-bottom:10px">👤 My Tasks</div>
-        <div style="color:var(--text3);font-size:13px;padding:10px 0">
-          Set your identity in <a onclick="showPanel('mytasks')" style="color:var(--accent);cursor:pointer">My Tasks</a> to see your personal tasks here.
-        </div>`;
+      if(valEl) valEl.textContent = '—';
+      if(subEl){ subEl.textContent = 'Set identity in My Tasks'; subEl.style.color='var(--text3)'; }
       return;
     }
-    const STATUS_COL_MY={'To Do':'var(--text3)','In Progress':'var(--cyan)','Review':'var(--purple)','Done':'var(--green)'};
-    const myT = tasks.filter(t=>(t.assignee||'').toLowerCase()===selfEmail.toLowerCase())
-      .sort((a,b)=>{
-        const ao=isOverdue(a)?0:(['To Do','In Progress','Review','Done'].indexOf(a.status)+1||9);
-        const bo=isOverdue(b)?0:(['To Do','In Progress','Review','Done'].indexOf(b.status)+1||9);
-        return ao-bo||(a.due||'').localeCompare(b.due||'');
-      }).slice(0,6); // show top 6
-    if(myTasksCount) myTasksCount.textContent = myT.length + (myT.length < tasks.filter(t=>(t.assignee||'').toLowerCase()===selfEmail.toLowerCase()).length ? ' (showing '+myT.length+')' : '');
-    if(!myT.length){
-      if(myTasksList) myTasksList.innerHTML=`<div style="color:var(--text3);font-size:13px;text-align:center;padding:16px 0">No tasks assigned to <strong>${selfEmail}</strong> yet.</div>`;
-      return;
+    const myT = tasks.filter(t=>(t.assignee||'').toLowerCase()===selfEmail.toLowerCase());
+    const myOpen = myT.filter(t=>t.status!=='Done').length;
+    const myOver = myT.filter(t=>isOverdue(t)).length;
+    if(valEl) valEl.textContent = myT.length;
+    if(subEl){
+      subEl.textContent = myOver ? '⚠ '+myOver+' overdue · '+myOpen+' open' : myOpen+' open · '+myT.filter(t=>t.status==='Done').length+' done';
+      subEl.style.color = myOver ? 'var(--red)' : 'var(--text3)';
     }
-    if(myTasksList) myTasksList.innerHTML = myT.map(t=>{
-      const ov=isOverdue(t);
-      const col=ov?'var(--red)':(STATUS_COL_MY[t.status]||'var(--text3)');
-      return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer" onclick="openDrawer('${t.id}')">
-        <div style="width:6px;height:6px;border-radius:50%;background:${PRIO_COLOR[t.priority]||'var(--border)'};flex-shrink:0"></div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.title)}</div>
-          <div style="font-size:11px;color:var(--text3)">${ov?'<span style="color:var(--red);font-weight:600">⚠ OVERDUE</span>':t.status} &nbsp;·&nbsp; ${fmt(t.due)}</div>
-        </div>
-        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
-        <button class="btn btn-ghost btn-sm" style="color:var(--cyan);padding:4px 8px;font-size:11px" onclick="event.stopPropagation();quickStatusCycle('${t.id}')">▶</button>
-      </div>`;
-    }).join('');
   })();
 
   // charts
@@ -1567,15 +1544,15 @@ function renderSettings(){
         </div>
         <div class="form-row">
           <div class="form-group"><label class="form-label">Azure App Client ID</label>
-            <input class="form-input" id="ms-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${getEmailConfig().clientId||localStorage.getItem('ms_client_id')||''}" /></div>
+            <input class="form-input" id="ms-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('ms_client_id')||''}" /></div>
           <div class="form-group"><label class="form-label">Tenant ID (or "common")</label>
-            <input class="form-input" id="ms-tenant-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${getEmailConfig().tenantId||localStorage.getItem('ms_tenant_id')||''}" /></div>
+            <input class="form-input" id="ms-tenant-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${localStorage.getItem('ms_tenant_id')||''}" /></div>
         </div>
         <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:11px;color:var(--text3);font-family:monospace;line-height:1.9">
-          <div><strong style="color:var(--text2)">Currently loaded by engine:</strong></div>
-          <div>Client ID: <span style="color:${getEmailConfig().clientId?'var(--green)':'var(--red)'}">${getEmailConfig().clientId || '❌ empty / not set'}</span></div>
-          <div>Tenant ID: <span style="color:${getEmailConfig().tenantId?'var(--green)':'var(--red)'}">${getEmailConfig().tenantId || '❌ empty / not set'}</span></div>
-          <div style="margin-top:4px"><button class="btn btn-danger btn-sm" style="font-size:10px;padding:3px 10px" onclick="localStorage.removeItem('ms_client_id');localStorage.removeItem('ms_tenant_id');_msalApp=null;_msalSignedIn=false;renderSettings();toast('Cleared — enter your IDs and save','var(--amber)')">🗑 Clear Saved IDs</button></div>
+          <div><strong style="color:var(--text2)">Currently saved in browser:</strong></div>
+          <div>Client ID: <span id="ms-saved-client-id-display" style="color:${localStorage.getItem('ms_client_id')?'var(--green)':'var(--red)'}">${localStorage.getItem('ms_client_id') || '❌ not saved yet'}</span></div>
+          <div>Tenant ID: <span id="ms-saved-tenant-id-display" style="color:${localStorage.getItem('ms_tenant_id')?'var(--green)':'var(--red)'}">${localStorage.getItem('ms_tenant_id') || '❌ not saved yet'}</span></div>
+          <div style="margin-top:4px"><button class="btn btn-danger btn-sm" style="font-size:10px;padding:3px 10px" onclick="localStorage.removeItem('ms_client_id');localStorage.removeItem('ms_tenant_id');_msalApp=null;_msalSignedIn=false;document.getElementById('ms-client-id').value='';document.getElementById('ms-tenant-id').value='';document.getElementById('ms-saved-client-id-display').textContent='❌ not saved yet';document.getElementById('ms-saved-client-id-display').style.color='var(--red)';document.getElementById('ms-saved-tenant-id-display').textContent='❌ not saved yet';document.getElementById('ms-saved-tenant-id-display').style.color='var(--red)';toast('Cleared — enter your IDs and save','var(--amber)')">🗑 Clear Saved IDs</button></div>
         </div>
 
         <!-- Microsoft Sign-In Status -->
@@ -1933,43 +1910,59 @@ function changePlantPassword(){
 function saveEmailSettings(){
   const clientId  = (document.getElementById('ms-client-id')?.value||'').trim();
   const tenantId  = (document.getElementById('ms-tenant-id')?.value||'').trim();
-  const testEmail = document.getElementById('ms-test-email')?.value||'';
+  const testEmail = (document.getElementById('ms-test-email')?.value||'').trim();
   const adminNotifyEmail = (document.getElementById('admin-notify-email')?.value||'').trim();
   const ejsService  = (document.getElementById('ejs-service-id')?.value||'').trim();
   const ejsTemplate = (document.getElementById('ejs-template-id')?.value||'').trim();
   const ejsKey      = (document.getElementById('ejs-public-key')?.value||'').trim();
 
-  // Always save all fields — even empty strings — so cleared values propagate
-  localStorage.setItem('ms_client_id', clientId);
-  localStorage.setItem('ms_tenant_id', tenantId);
-  localStorage.setItem('ms_test_email', testEmail);
+  // ── Step 1: Write to localStorage immediately ───────────────────────
+  localStorage.setItem('ms_client_id',       clientId);
+  localStorage.setItem('ms_tenant_id',       tenantId);
+  localStorage.setItem('ms_test_email',      testEmail);
   localStorage.setItem('admin_notify_email', adminNotifyEmail);
-  localStorage.setItem('ejs_service_id',  ejsService);
-  localStorage.setItem('ejs_template_id', ejsTemplate);
-  localStorage.setItem('ejs_public_key',  ejsKey);
+  localStorage.setItem('ejs_service_id',     ejsService);
+  localStorage.setItem('ejs_template_id',    ejsTemplate);
+  localStorage.setItem('ejs_public_key',     ejsKey);
 
-  // Reset MSAL so new credentials take effect immediately
+  // ── Step 2: Verify write actually landed (read back immediately) ────
+  const verifyId  = localStorage.getItem('ms_client_id');
+  const verifyTen = localStorage.getItem('ms_tenant_id');
+  console.log('[Settings] Saved Client ID:', verifyId);
+  console.log('[Settings] Saved Tenant ID:', verifyTen);
+
+  // ── Step 3: Update the in-page status display without full re-render ─
+  const cidStatus = document.getElementById('ms-saved-client-id-display');
+  const tidStatus = document.getElementById('ms-saved-tenant-id-display');
+  if(cidStatus){ cidStatus.textContent = verifyId || '❌ not saved'; cidStatus.style.color = verifyId ? 'var(--green)' : 'var(--red)'; }
+  if(tidStatus){ tidStatus.textContent = verifyTen || '❌ not saved'; tidStatus.style.color = verifyTen ? 'var(--green)' : 'var(--red)'; }
+
+  // ── Step 4: Reset MSAL so new credentials take effect ───────────────
   _msalApp = null;
   _msalSignedIn = false;
 
-  // Persist to Firestore
-  if(_fbReady&&_db){
-    _db.collection('settings').doc('msgraph').set({
-      clientId,tenantId,testEmail,adminNotifyEmail,ejsService,ejsTemplate,ejsKey
-    },{merge:true}).then(()=>{
-      console.log('[Settings] Email config saved to Firestore');
-    }).catch(e=>console.warn('email settings save error',e));
+  // ── Step 5: Persist to Firestore ────────────────────────────────────
+  if(_fbReady && _db){
+    _db.collection('settings').doc('msgraph').set(
+      {clientId, tenantId, testEmail, adminNotifyEmail, ejsService, ejsTemplate, ejsKey},
+      {merge: true}
+    ).then(()=>{
+      console.log('[Settings] Email config synced to Firestore ✓');
+    }).catch(e => console.warn('[Settings] Firestore save error:', e));
   }
 
+  // ── Step 6: Show confirmation ────────────────────────────────────────
   const transport = emailTransport();
-  const transportLabel = transport==='msgraph'?'Microsoft Graph':transport==='emailjs'?'EmailJS':'mailto (fallback)';
-  if(transport === 'msgraph'){
-    toast('✅ IDs saved! Now click "Sign In with Microsoft" to authorize email sending.');
+  if(clientId && tenantId){
+    toast('✅ Client ID & Tenant ID saved! Click "Sign In with Microsoft" to authorize.');
+    // Update sign-in button label
+    const signinBtn = document.getElementById('msal-signin-btn');
+    if(signinBtn && signinBtn.textContent.includes('Sign In')){ signinBtn.style.boxShadow = '0 0 0 2px var(--green)'; }
+  } else if(transport === 'emailjs'){
+    toast('✅ EmailJS settings saved.');
   } else {
-    toast('✅ Email settings saved — active transport: '+transportLabel);
+    toast('⚠ Settings saved — no email transport configured yet.', 'var(--amber)');
   }
-  // Re-render settings to update status badge
-  setTimeout(()=>renderSettings(),300);
 }
 
 function switchEmailTab(tab){
