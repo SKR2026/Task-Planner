@@ -509,10 +509,33 @@ let _unsubscribeTasks = null;
     const s2 = document.createElement('script');
     s2.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js';
     s2.onload = () => {
+      // Load Firebase Auth, then sign in anonymously before touching Firestore
+      const s3 = document.createElement('script');
+      s3.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
+      s3.onload = () => {
+        try {
+          if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
+          _db = firebase.firestore();
+
+          // Sign in anonymously so request.auth != null satisfies Firestore rules
+          firebase.auth().signInAnonymously()
+            .then(() => { _fbReady = true; startFirestoreListeners(); })
+            .catch(err => {
+              console.error('Anonymous auth failed:', err);
+              _fbReady = true;
+              startFirestoreListeners(); // try anyway — onSnapshot error handler shows red dot
+            });
+        } catch(e) {
+          const dot=document.getElementById('fb-dot');
+          if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: init failed';}
+          console.warn('Firebase init error:', e);
+        }
+      };
+      document.head.appendChild(s3);
+    };
+    // Moved all Firestore calls into this function so they run after auth
+    function startFirestoreListeners() {
       try {
-        if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
-        _db = firebase.firestore();
-        _fbReady = true;
 
         // Load persisted settings from Firestore
         _db.collection('settings').doc('admin').get().then(d=>{
@@ -603,7 +626,7 @@ let _unsubscribeTasks = null;
         if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: init failed';}
         console.warn('Firebase init error:', e);
       }
-    };
+    } // end startFirestoreListeners
     document.head.appendChild(s2);
   };
   document.head.appendChild(s1);
