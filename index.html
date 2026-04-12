@@ -503,39 +503,20 @@ let _fbReady = false;
 let _unsubscribeTasks = null;
 
 (function initFirebase() {
-  const s1 = document.createElement('script');
-  s1.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js';
-  s1.onload = () => {
-    const s2 = document.createElement('script');
-    s2.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js';
-    s2.onload = () => {
-      // Load Firebase Auth, then sign in anonymously before touching Firestore
-      const s3 = document.createElement('script');
-      s3.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
-      s3.onload = () => {
-        try {
-          if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
-          _db = firebase.firestore();
+  // Helper: set the status dot colour
+  function setDot(color, titleMsg) {
+    const dot  = document.getElementById('fb-dot');
+    const sdot = document.getElementById('fb-settings-dot');
+    const slbl = document.getElementById('fb-settings-label');
+    const glow = '0 0 8px ' + color;
+    if (dot)  { dot.style.background  = color; dot.style.boxShadow  = glow; if (titleMsg) dot.title = titleMsg; }
+    if (sdot) { sdot.style.background = color; sdot.style.boxShadow = glow; }
+    if (slbl && titleMsg) { slbl.style.color = color; slbl.textContent = titleMsg; }
+  }
 
-          // Sign in anonymously so request.auth != null satisfies Firestore rules
-          firebase.auth().signInAnonymously()
-            .then(() => { _fbReady = true; startFirestoreListeners(); })
-            .catch(err => {
-              console.error('Anonymous auth failed:', err);
-              _fbReady = true;
-              startFirestoreListeners(); // try anyway — onSnapshot error handler shows red dot
-            });
-        } catch(e) {
-          const dot=document.getElementById('fb-dot');
-          if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: init failed';}
-          console.warn('Firebase init error:', e);
-        }
-      };
-      document.head.appendChild(s3);
-    };
-    // Moved all Firestore calls into this function so they run after auth
-    function startFirestoreListeners() {
-      try {
+  // All Firestore work happens here — called only after anonymous auth succeeds
+  function startFirestoreListeners() {
+    try {
 
         // Load persisted settings from Firestore
         _db.collection('settings').doc('admin').get().then(d=>{
@@ -622,14 +603,47 @@ let _unsubscribeTasks = null;
           console.warn('Firestore error:', err);
         });
       } catch(e) {
-        const dot=document.getElementById('fb-dot');
-        if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: init failed';}
-        console.warn('Firebase init error:', e);
+        setDot('var(--red)', 'Firebase: Firestore error — ' + e.message);
+        console.warn('Firestore listener error:', e);
       }
-    } // end startFirestoreListeners
-    document.head.appendChild(s2);
-  };
-  document.head.appendChild(s1);
+  } // end startFirestoreListeners
+
+  // ── Load scripts in order: app → firestore → auth → signIn → listeners ──
+  function loadScript(src, cb) {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = cb;
+    s.onerror = () => { setDot('var(--red)', 'Firebase: script load failed — ' + src); };
+    document.head.appendChild(s);
+  }
+
+  loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js', () => {
+    loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js', () => {
+      loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js', () => {
+        try {
+          if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
+          _db = firebase.firestore();
+
+          // Must be signed in before Firestore rules (request.auth != null) allow access
+          firebase.auth().signInAnonymously()
+            .then(() => {
+              _fbReady = true;
+              startFirestoreListeners();
+            })
+            .catch(err => {
+              setDot('var(--red)', 'Firebase: anonymous auth failed — ' + err.message);
+              console.error('signInAnonymously failed:', err);
+              // Still attempt listeners so the red dot + error message shows correctly
+              _fbReady = true;
+              startFirestoreListeners();
+            });
+        } catch(e) {
+          setDot('var(--red)', 'Firebase: init failed — ' + e.message);
+          console.warn('Firebase init error:', e);
+        }
+      });
+    });
+  });
 })();
 
 // ── state ─────────────────────────────────────────────────────────────
