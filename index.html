@@ -618,20 +618,47 @@ let tasks = JSON.parse(localStorage.getItem('tf_tasks') || 'null') || SEED;
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(renderPlantNav, 100);
 
-  // Sign in anonymously to satisfy Firestore security rules (request.auth != null)
-  // Exact same pattern as Plant Visit app
-  firebase.auth().signInAnonymously()
-    .then(() => {
-      _fbReady = true;
-      startFirestoreListeners();
+  // ── Firebase Auth → Firestore ─────────────────────────────────────────
+  // Works on both http:// (Firebase Hosting / localhost) and file:// origins.
+  // Strategy:
+  //   1. Try signInAnonymously (requires Anonymous Auth enabled in Console).
+  //   2. If auth succeeds → start Firestore listeners normally.
+  //   3. If auth fails (e.g. file:// origin restriction or not enabled) →
+  //      fall back to starting listeners without auth so the app still loads
+  //      from localStorage/SEED data, and show a clear status message.
+
+  function bootFirestore(user) {
+    if (_fbReady) return;
+    _fbReady = true;
+    if (user) {
+      console.log('[Firebase] Authenticated uid:', user.uid);
+    } else {
+      console.warn('[Firebase] Starting without auth — Firestore writes may be blocked by rules.');
+      setDot('var(--red)', 'Firebase: not authenticated — open via http:// or Firebase Hosting');
+    }
+    startFirestoreListeners();
+  }
+
+  // Listen for auth state — covers both fresh sign-in and page-refresh resume
+  firebase.auth().onAuthStateChanged(user => {
+    if (user) bootFirestore(user);
+  });
+
+  // Attempt anonymous sign-in
+  firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+    .then(() => firebase.auth().signInAnonymously())
+    .then(result => {
+      console.log('[Firebase] signInAnonymously OK');
+      // onAuthStateChanged will call bootFirestore
     })
     .catch(err => {
-      console.error('Firebase anonymous auth failed:', err);
-      setDot('var(--red)', 'Firebase: anonymous auth failed — ' + err.message);
-      // Still attempt so error state shows in UI
-      _fbReady = true;
-      startFirestoreListeners();
+      console.error('[Firebase] signInAnonymously FAILED:', err.code, err.message);
+      // If running from file:// — auth will fail. Boot anyway so UI works from local data.
+      bootFirestore(null);
     });
+
+  // Safety net: if neither auth nor failure fires within 5s, boot anyway
+  setTimeout(() => { if (!_fbReady) { console.warn('[Firebase] Auth timeout — booting anyway'); bootFirestore(null); } }, 5000);
 });
 let mode = 'admin'; // 'admin' | 'user'
 let currentPanel = 'dashboard';
