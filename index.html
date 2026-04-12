@@ -7,6 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Firebase — loaded statically so auth is available before any Firestore call -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <!-- Microsoft MSAL – Azure AD / Microsoft Graph token acquisition -->
 <script src="https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"
   onerror="console.error('❌ MSAL failed to load from unpkg. Trying jsDelivr fallback…');
@@ -488,34 +492,34 @@ const SEED = [
 ];
 
 // ── Firebase Setup ────────────────────────────────────────────────────
+// Firebase scripts are loaded statically in <head> (same pattern as Plant Visit app)
 const _fbConfig = {
-  apiKey: "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
-  authDomain: "skr-task.firebaseapp.com",
-  projectId: "skr-task",
-  storageBucket: "skr-task.firebasestorage.app",
+  apiKey:            "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
+  authDomain:        "skr-task.firebaseapp.com",
+  projectId:         "skr-task",
+  storageBucket:     "skr-task.firebasestorage.app",
   messagingSenderId: "1011690659933",
-  appId: "1:1011690659933:web:f57e43ee0267a475682db4",
-  measurementId: "G-67NGHMK0QR"
+  appId:             "1:1011690659933:web:f57e43ee0267a475682db4",
+  measurementId:     "G-67NGHMK0QR"
 };
 
-let _db = null;
+if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
+const _db = firebase.firestore();
+
 let _fbReady = false;
 let _unsubscribeTasks = null;
 
-(function initFirebase() {
-  // Helper: set the status dot colour
-  function setDot(color, titleMsg) {
-    const dot  = document.getElementById('fb-dot');
-    const sdot = document.getElementById('fb-settings-dot');
-    const slbl = document.getElementById('fb-settings-label');
-    const glow = '0 0 8px ' + color;
-    if (dot)  { dot.style.background  = color; dot.style.boxShadow  = glow; if (titleMsg) dot.title = titleMsg; }
-    if (sdot) { sdot.style.background = color; sdot.style.boxShadow = glow; }
-    if (slbl && titleMsg) { slbl.style.color = color; slbl.textContent = titleMsg; }
-  }
+function setDot(color, titleMsg) {
+  const dot  = document.getElementById('fb-dot');
+  const sdot = document.getElementById('fb-settings-dot');
+  const slbl = document.getElementById('fb-settings-label');
+  const glow = '0 0 8px ' + color;
+  if (dot)  { dot.style.background  = color; dot.style.boxShadow  = glow; if (titleMsg) dot.title = titleMsg; }
+  if (sdot) { sdot.style.background = color; sdot.style.boxShadow = glow; }
+  if (slbl && titleMsg) { slbl.style.color = color; slbl.textContent = titleMsg; }
+}
 
-  // All Firestore work happens here — called only after anonymous auth succeeds
-  function startFirestoreListeners() {
+function startFirestoreListeners() {
     try {
 
         // Load persisted settings from Firestore
@@ -606,50 +610,29 @@ let _unsubscribeTasks = null;
         setDot('var(--red)', 'Firebase: Firestore error — ' + e.message);
         console.warn('Firestore listener error:', e);
       }
-  } // end startFirestoreListeners
-
-  // ── Load scripts in order: app → firestore → auth → signIn → listeners ──
-  function loadScript(src, cb) {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = cb;
-    s.onerror = () => { setDot('var(--red)', 'Firebase: script load failed — ' + src); };
-    document.head.appendChild(s);
-  }
-
-  loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js', () => {
-    loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js', () => {
-      loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js', () => {
-        try {
-          if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
-          _db = firebase.firestore();
-
-          // Must be signed in before Firestore rules (request.auth != null) allow access
-          firebase.auth().signInAnonymously()
-            .then(() => {
-              _fbReady = true;
-              startFirestoreListeners();
-            })
-            .catch(err => {
-              setDot('var(--red)', 'Firebase: anonymous auth failed — ' + err.message);
-              console.error('signInAnonymously failed:', err);
-              // Still attempt listeners so the red dot + error message shows correctly
-              _fbReady = true;
-              startFirestoreListeners();
-            });
-        } catch(e) {
-          setDot('var(--red)', 'Firebase: init failed — ' + e.message);
-          console.warn('Firebase init error:', e);
-        }
-      });
-    });
-  });
-})();
+} // end startFirestoreListeners
 
 // ── state ─────────────────────────────────────────────────────────────
 let tasks = JSON.parse(localStorage.getItem('tf_tasks') || 'null') || SEED;
 // plant nav rendered after DOM is ready
-document.addEventListener('DOMContentLoaded',()=>{ setTimeout(renderPlantNav,100); });
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(renderPlantNav, 100);
+
+  // Sign in anonymously to satisfy Firestore security rules (request.auth != null)
+  // Exact same pattern as Plant Visit app
+  firebase.auth().signInAnonymously()
+    .then(() => {
+      _fbReady = true;
+      startFirestoreListeners();
+    })
+    .catch(err => {
+      console.error('Firebase anonymous auth failed:', err);
+      setDot('var(--red)', 'Firebase: anonymous auth failed — ' + err.message);
+      // Still attempt so error state shows in UI
+      _fbReady = true;
+      startFirestoreListeners();
+    });
+});
 let mode = 'admin'; // 'admin' | 'user'
 let currentPanel = 'dashboard';
 let activeDrawerTask = null;
