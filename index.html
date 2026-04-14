@@ -3528,17 +3528,7 @@ function renderUserTask(c){
       <div class="card" style="margin-bottom:14px;padding:16px">
         <div class="section-head" style="margin-bottom:10px">📎 Task Attachments (${(t.attachments||[]).length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:7px">
-          ${t.attachments.map(a=>{
-            const url=a.storageUrl||a.dataUrl;
-            const isImg=url&&(a.type||'').startsWith('image/');
-            const isPdf=url&&(a.type==='application/pdf'||(a.name||'').toLowerCase().endsWith('.pdf'));
-            return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 10px;font-size:12px;">` +
-              `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>` +
-              `<span style="color:var(--text)">${a.name} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></span>` +
-              (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>` +
-                   `<a href="${url}" download="${a.name}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'') +
-              `</div>`;
-          }).join('')}
+          ${renderAttachmentChips(t.attachments)}
         </div>
       </div>`:''}
 
@@ -3559,17 +3549,7 @@ function renderUserTask(c){
           <div class="reply-item">
             <div><span class="reply-author">${r.author}</span><span class="reply-time">${fmtTime(r.time)}</span></div>
             ${r.text?`<div class="reply-text">${r.text}</div>`:''}
-            ${r.attachments&&r.attachments.length?`<div class="reply-attachments">${r.attachments.map(a=>{
-              const url=a.storageUrl||a.dataUrl;
-              const isImg=url&&(a.type||'').startsWith('image/');
-              const isPdf=url&&(a.type==='application/pdf'||a.name.toLowerCase().endsWith('.pdf'));
-              return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 8px;font-size:12px;">`+
-                `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>`+
-                `<span style="color:var(--text)">${a.name} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></span>`+
-                (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>`+
-                     `<a href="${url}" download="${a.name}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'<span style="color:var(--text3);margin-left:4px">⚠ no link</span>')+
-                `</div>`;
-            }).join('')}</div>`:''}
+            ${r.attachments&&r.attachments.length?`<div class="reply-attachments">${renderAttachmentChips(r.attachments)}</div>`:``}
           </div>`).join(''):'<div style="color:var(--text3);font-size:13px">No replies yet. Be the first to update!</div>'}
         </div>
       </div>
@@ -3728,6 +3708,27 @@ function closeDrawer(){
   else if(currentPanel==='dashboard') renderDashboard();
 }
 
+
+// ── Renders attachment chips with View/Download links ───────────────────
+function renderAttachmentChips(arr) {
+  if (!arr || !arr.length) return '';
+  return arr.map(a => {
+    const url = a.storageUrl || a.dataUrl || '';
+    const isImg = url && (a.type || '').startsWith('image/');
+    const isPdf = url && (a.type === 'application/pdf' || (a.name || '').toLowerCase().endsWith('.pdf'));
+    const icon = isImg ? '🖼️' : isPdf ? '📑' : '📄';
+    const sizeKB = a.size ? ((a.size / 1024).toFixed(0) + ' KB') : '';
+    const viewBtn = url ? `<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;padding:1px 6px;border-radius:4px;background:rgba(91,141,238,.12);font-size:11px">👁 View</a>` : '';
+    const dlBtn  = url ? `<a href="${url}" download="${esc(a.name)}" style="color:var(--text2);text-decoration:none;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.06);font-size:11px">⬇</a>` : '';
+    return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:5px 9px;font-size:12px;">`
+         + `<span>${icon}</span>`
+         + `<span style="color:var(--text);font-weight:600">${esc(a.name)}</span>`
+         + (sizeKB ? `<span style="color:var(--text3)">(${sizeKB})</span>` : '')
+         + (url ? `<span style="display:inline-flex;gap:4px;margin-left:4px">${viewBtn}${dlBtn}</span>` : '<span style="color:var(--amber);font-size:10px">⚠ no URL</span>')
+         + `</div>`;
+  }).join('');
+}
+
 function renderDrawerContent(){
   const t=activeDrawerTask;
   const drawer=document.getElementById('task-drawer');
@@ -3780,19 +3781,9 @@ function renderDrawerContent(){
   <div class="card-sm" style="margin-bottom:14px">
     <div class="section-head" style="margin-bottom:8px">📎 Attachments (${(t.attachments||[]).length})</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
-      ${t.attachments.map(a=>{
-        const url=a.storageUrl||a.dataUrl;
-        const isImg=url&&(a.type||'').startsWith('image/');
-        const isPdf=url&&(a.type==='application/pdf'||(a.name||'').toLowerCase().endsWith('.pdf'));
-        return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 10px;font-size:12px;">` +
-          `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>` +
-          `<span style="color:var(--text)">${esc(a.name)}</span>` +
-          (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>` +
-               `<a href="${url}" download="${esc(a.name)}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'') +
-          `</div>`;
-      }).join('')}
+      ${renderAttachmentChips(t.attachments)}
     </div>
-  </div>`:''}
+  </div>`:``}
 
   <div style="margin-bottom:14px">
     <div class="section-head" style="margin-bottom:10px">💬 Replies (${(t.replies||[]).length})</div>
@@ -3801,17 +3792,7 @@ function renderDrawerContent(){
       <div class="reply-item">
         <div><span class="reply-author">${r.author}</span><span class="reply-time">${fmtTime(r.time)}</span></div>
         ${r.text?`<div class="reply-text">${r.text}</div>`:''}
-        ${r.attachments&&r.attachments.length?`<div class="reply-attachments">${r.attachments.map(a=>{
-          const url=a.storageUrl||a.dataUrl;
-          const isImg=url&&(a.type||'').startsWith('image/');
-          const isPdf=url&&(a.type==='application/pdf'||a.name.toLowerCase().endsWith('.pdf'));
-          return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 8px;font-size:12px;">`+
-            `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>`+
-            `<span style="color:var(--text)">${esc(a.name)} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></span>`+
-            (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>`+
-                 `<a href="${url}" download="${esc(a.name)}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'<span style="color:var(--text3);margin-left:4px">⚠ no link</span>')+
-            `</div>`;
-        }).join('')}</div>`:''}
+        ${r.attachments&&r.attachments.length?`<div class="reply-attachments">${renderAttachmentChips(r.attachments)}</div>`:``}
       </div>`).join('')||'<div style="color:var(--text3);font-size:13px;padding:8px 0">No replies yet.</div>'}
     </div>
   </div>
