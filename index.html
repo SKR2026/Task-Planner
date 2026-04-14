@@ -505,112 +505,148 @@ let _unsubscribeTasks = null;
 (function initFirebase() {
   const s1 = document.createElement('script');
   s1.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js';
+  s1.onerror = () => {
+    console.error('❌ Firebase app script failed to load');
+    updateDashFbStatus('error', 0, 'Firebase SDK failed to load — check network/CSP');
+  };
   s1.onload = () => {
     const s2 = document.createElement('script');
     s2.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js';
+    s2.onerror = () => {
+      console.error('❌ Firebase Firestore script failed to load');
+      updateDashFbStatus('error', 0, 'Firestore SDK failed to load — check network/CSP');
+    };
     s2.onload = () => {
-      try {
-        if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
-        _db = firebase.firestore();
-        _fbReady = true;
-
-        // Load persisted settings from Firestore
-        _db.collection('settings').doc('admin').get().then(d=>{
-          if(d.exists&&d.data().password) localStorage.setItem('admin_password',d.data().password);
-        }).catch(()=>{});
-        _db.collection('settings').doc('msgraph').get().then(d=>{
-          if(d.exists){
-            const s=d.data();
-            if(s.clientId)        localStorage.setItem('ms_client_id',s.clientId);
-            if(s.tenantId)        localStorage.setItem('ms_tenant_id',s.tenantId);
-            if(s.testEmail)        localStorage.setItem('ms_test_email',s.testEmail);
-            if(s.adminNotifyEmail) localStorage.setItem('admin_notify_email',s.adminNotifyEmail);
-            if(s.ejsService)       localStorage.setItem('ejs_service_id',s.ejsService);
-            if(s.ejsTemplate)      localStorage.setItem('ejs_template_id',s.ejsTemplate);
-            if(s.ejsKey)           localStorage.setItem('ejs_public_key',s.ejsKey);
-          }
-        }).catch(()=>{});
-        _db.collection('settings').doc('plantGroups').get().then(d=>{
-          if(d.exists&&d.data().plants){
-            localStorage.setItem('pg_plants',JSON.stringify(d.data().plants));
-            renderPlantNav();
-          }
-        }).catch(()=>{});
-        // Load custom email templates from Firestore
-        ['assigned','status_change','completed','reminder','date_change','priority_change','updated'].forEach(key=>{
-          _db.collection('settings').doc('email_tpl_'+key).get().then(d=>{
-            if(d.exists){ localStorage.setItem('email_tpl_'+key, JSON.stringify(d.data())); }
-          }).catch(()=>{});
-        });
-        // Subscribe to real-time task updates
-        _unsubscribeTasks = _db.collection('tasks').onSnapshot(snap => {
-          // Mark connected
-          const dot=document.getElementById('fb-dot');
-          if(dot){dot.style.background='var(--green)';dot.style.boxShadow='0 0 8px var(--green)';dot.title='Firebase: connected ✓';}
-          const sdot=document.getElementById('fb-settings-dot');
-          const slbl=document.getElementById('fb-settings-label');
-          if(sdot){sdot.style.background='var(--green)';sdot.style.boxShadow='0 0 8px var(--green)';}
-          if(slbl){slbl.style.color='var(--green)';slbl.textContent='Connected to Firebase ✓ — '+snap.docs.length+' task(s) synced';}
-          updateDashFbStatus('connected', snap.docs.length);
-          if (snap.empty && tasks.length === 0) {
-            // First run — seed Firestore with demo data
-            const batch = _db.batch();
-            SEED.forEach(t => batch.set(_db.collection('tasks').doc(t.id), t));
-            batch.commit();
-          } else if (!snap.empty) {
-            const prevTasks = tasks;
-            tasks = snap.docs.map(d => d.data());
-
-            // Detect new replies from users (for admin bell notification)
-            if(mode === 'admin' && prevTasks.length > 0){
-              tasks.forEach(newT => {
-                const oldT = prevTasks.find(p => p.id === newT.id);
-                const newReplies = (newT.replies || []);
-                const oldReplies = (oldT ? (oldT.replies || []) : []);
-                if(newReplies.length > oldReplies.length){
-                  // New reply(ies) added
-                  newReplies.slice(oldReplies.length).forEach(r => {
-                    // Only notify admin if reply is NOT from Admin
-                    if(r.author !== 'Admin'){
-                      addNotification(newT.id, newT.title, r.author, r.text || '(attachment)');
-                      // Also send email notification to admin if Microsoft Graph is configured (only for real admin, not plant owner)
-                      const cfg = getEmailConfig();
-                      if(adminAuthenticated && cfg.clientId && cfg.tenantId){
-                        sendReplyNotificationEmail(newT, r);
-                      }
-                    }
-                  });
-                }
-              });
-            }
-
-            refreshOverdueBadge();
-            renderPlantNav();
-            if (currentPanel === 'dashboard') renderDashboard();
-            else if (currentPanel === 'tasks') renderTasks();
-            else if (currentPanel === 'kanban') renderKanban();
-          }
-        }, err => {
-          const dot=document.getElementById('fb-dot');
-          if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: error — '+err.message;}
-          const sdot=document.getElementById('fb-settings-dot');
-          const slbl=document.getElementById('fb-settings-label');
-          if(sdot){sdot.style.background='var(--red)';sdot.style.boxShadow='0 0 8px var(--red)';}
-          if(slbl){slbl.style.color='var(--red)';slbl.textContent='Firebase error: '+err.message;}
-          updateDashFbStatus('error', 0, err.message);
-          console.warn('Firestore error:', err);
-        });
-      } catch(e) {
-        const dot=document.getElementById('fb-dot');
-        if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: init failed';}
-        updateDashFbStatus('error', 0, e.message);
-        console.warn('Firebase init error:', e);
-      }
+      // Load Firebase Auth SDK (Firestore rules require request.auth != null)
+      const s3 = document.createElement('script');
+      s3.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
+      s3.onerror = () => { updateDashFbStatus('error', 0, 'Firebase Auth SDK failed to load'); };
+      s3.onload = () => {
+        try {
+          if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
+          _db = firebase.firestore();
+          // Sign in anonymously so rules (request.auth != null) pass
+          firebase.auth().signInAnonymously()
+            .then(() => {
+              console.log('Firebase anonymous auth OK');
+              _fbReady = true;
+              startFirestoreListeners();
+            })
+            .catch(e => {
+              updateDashFbStatus('error', 0, 'Auth sign-in failed: ' + e.message);
+              console.error('Firebase auth error:', e);
+            });
+        } catch(e) {
+          const dot = document.getElementById('fb-dot');
+          if(dot){ dot.style.background='var(--red)'; dot.style.boxShadow='0 0 8px var(--red)'; dot.title='Firebase: init failed'; }
+          updateDashFbStatus('error', 0, e.message);
+          console.warn('Firebase init error:', e);
+        }
+      };
+      document.head.appendChild(s3);
     };
     document.head.appendChild(s2);
   };
   document.head.appendChild(s1);
+
 })();
+
+function startFirestoreListeners() {
+  // Watchdog: if no snapshot in 8s, show error
+  const _fbWatchdog = setTimeout(() => {
+    const dot = document.getElementById('fb-dot');
+    if(dot && dot.style.background !== 'var(--green)'){
+      updateDashFbStatus('error', 0, 'Timed out — Firestore rules may be blocking access');
+      if(dot){ dot.style.background='var(--red)'; dot.style.boxShadow='0 0 8px var(--red)'; dot.title='Firebase: timed out'; }
+    }
+  }, 8000);
+
+  // Load persisted settings from Firestore
+  _db.collection('settings').doc('admin').get().then(d=>{
+    if(d.exists&&d.data().password) localStorage.setItem('admin_password',d.data().password);
+  }).catch(()=>{});
+  _db.collection('settings').doc('msgraph').get().then(d=>{
+    if(d.exists){
+      const s=d.data();
+      if(s.clientId)        localStorage.setItem('ms_client_id',s.clientId);
+      if(s.tenantId)        localStorage.setItem('ms_tenant_id',s.tenantId);
+      if(s.testEmail)        localStorage.setItem('ms_test_email',s.testEmail);
+      if(s.adminNotifyEmail) localStorage.setItem('admin_notify_email',s.adminNotifyEmail);
+      if(s.ejsService)       localStorage.setItem('ejs_service_id',s.ejsService);
+      if(s.ejsTemplate)      localStorage.setItem('ejs_template_id',s.ejsTemplate);
+      if(s.ejsKey)           localStorage.setItem('ejs_public_key',s.ejsKey);
+    }
+  }).catch(()=>{});
+  _db.collection('settings').doc('plantGroups').get().then(d=>{
+    if(d.exists&&d.data().plants){
+      localStorage.setItem('pg_plants',JSON.stringify(d.data().plants));
+      renderPlantNav();
+    }
+  }).catch(()=>{});
+  // Load custom email templates from Firestore
+  ['assigned','status_change','completed','reminder','date_change','priority_change','updated'].forEach(key=>{
+    _db.collection('settings').doc('email_tpl_'+key).get().then(d=>{
+      if(d.exists){ localStorage.setItem('email_tpl_'+key, JSON.stringify(d.data())); }
+    }).catch(()=>{});
+  });
+  // Subscribe to real-time task updates
+  _unsubscribeTasks = _db.collection('tasks').onSnapshot(snap => {
+    // Mark connected
+    clearTimeout(_fbWatchdog);
+    const dot=document.getElementById('fb-dot');
+    if(dot){dot.style.background='var(--green)';dot.style.boxShadow='0 0 8px var(--green)';dot.title='Firebase: connected ✓';}
+    const sdot=document.getElementById('fb-settings-dot');
+    const slbl=document.getElementById('fb-settings-label');
+    if(sdot){sdot.style.background='var(--green)';sdot.style.boxShadow='0 0 8px var(--green)';}
+    if(slbl){slbl.style.color='var(--green)';slbl.textContent='Connected to Firebase ✓ — '+snap.docs.length+' task(s) synced';}
+    updateDashFbStatus('connected', snap.docs.length);
+    if (snap.empty && tasks.length === 0) {
+      // First run — seed Firestore with demo data
+      const batch = _db.batch();
+      SEED.forEach(t => batch.set(_db.collection('tasks').doc(t.id), t));
+      batch.commit();
+    } else if (!snap.empty) {
+      const prevTasks = tasks;
+      tasks = snap.docs.map(d => d.data());
+
+      // Detect new replies from users (for admin bell notification)
+      if(mode === 'admin' && prevTasks.length > 0){
+        tasks.forEach(newT => {
+          const oldT = prevTasks.find(p => p.id === newT.id);
+          const newReplies = (newT.replies || []);
+          const oldReplies = (oldT ? (oldT.replies || []) : []);
+          if(newReplies.length > oldReplies.length){
+            newReplies.slice(oldReplies.length).forEach(r => {
+              if(r.author !== 'Admin'){
+                addNotification(newT.id, newT.title, r.author, r.text || '(attachment)');
+                const cfg = getEmailConfig();
+                if(adminAuthenticated && cfg.clientId && cfg.tenantId){
+                  sendReplyNotificationEmail(newT, r);
+                }
+              }
+            });
+          }
+        });
+      }
+
+      refreshOverdueBadge();
+      renderPlantNav();
+      if (currentPanel === 'dashboard') renderDashboard();
+      else if (currentPanel === 'tasks') renderTasks();
+      else if (currentPanel === 'kanban') renderKanban();
+    }
+  }, err => {
+    clearTimeout(_fbWatchdog);
+    const dot=document.getElementById('fb-dot');
+    if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: error — '+err.message;}
+    const sdot=document.getElementById('fb-settings-dot');
+    const slbl=document.getElementById('fb-settings-label');
+    if(sdot){sdot.style.background='var(--red)';sdot.style.boxShadow='0 0 8px var(--red)';}
+    if(slbl){slbl.style.color='var(--red)';slbl.textContent='Firebase error: '+err.message;}
+    updateDashFbStatus('error', 0, err.message);
+    console.warn('Firestore error:', err);
+  });
+}
 
 // ── state ─────────────────────────────────────────────────────────────
 let tasks = JSON.parse(localStorage.getItem('tf_tasks') || 'null') || SEED;
