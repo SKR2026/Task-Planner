@@ -522,26 +522,12 @@ let _unsubscribeTasks = null;
       s3.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
       s3.onerror = () => { updateDashFbStatus('error', 0, 'Firebase Auth SDK failed to load'); };
       s3.onload = () => {
-        try {
-          if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
-          _db = firebase.firestore();
-          // Sign in anonymously so rules (request.auth != null) pass
-          firebase.auth().signInAnonymously()
-            .then(() => {
-              console.log('Firebase anonymous auth OK');
-              _fbReady = true;
-              startFirestoreListeners();
-            })
-            .catch(e => {
-              updateDashFbStatus('error', 0, 'Auth sign-in failed: ' + e.message);
-              console.error('Firebase auth error:', e);
-            });
-        } catch(e) {
-          const dot = document.getElementById('fb-dot');
-          if(dot){ dot.style.background='var(--red)'; dot.style.boxShadow='0 0 8px var(--red)'; dot.title='Firebase: init failed'; }
-          updateDashFbStatus('error', 0, e.message);
-          console.warn('Firebase init error:', e);
-        }
+        // Load Firebase Storage SDK
+        const s4 = document.createElement('script');
+        s4.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js';
+        s4.onerror = () => { console.warn('Firebase Storage SDK failed to load — file uploads will use base64 fallback'); initFirebaseCore(); };
+        s4.onload = () => { initFirebaseCore(); };
+        document.head.appendChild(s4);
       };
       document.head.appendChild(s3);
     };
@@ -550,6 +536,37 @@ let _unsubscribeTasks = null;
   document.head.appendChild(s1);
 
 })();
+
+/** Called once all Firebase SDKs (app + firestore + auth + storage) are loaded */
+function initFirebaseCore() {
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
+    _db = firebase.firestore();
+    // Initialise Storage if SDK loaded
+    if (firebase.storage) {
+      window._fbStorage = firebase.storage();
+      console.log('✅ Firebase Storage ready — bucket:', _fbConfig.storageBucket);
+    } else {
+      console.warn('⚠ Firebase Storage SDK not loaded — uploads fall back to base64');
+    }
+    // Sign in anonymously so Firestore rules (request.auth != null) pass
+    firebase.auth().signInAnonymously()
+      .then(() => {
+        console.log('Firebase anonymous auth OK');
+        _fbReady = true;
+        startFirestoreListeners();
+      })
+      .catch(e => {
+        updateDashFbStatus('error', 0, 'Auth sign-in failed: ' + e.message);
+        console.error('Firebase auth error:', e);
+      });
+  } catch(e) {
+    const dot = document.getElementById('fb-dot');
+    if(dot){ dot.style.background='var(--red)'; dot.style.boxShadow='0 0 8px var(--red)'; dot.title='Firebase: init failed'; }
+    updateDashFbStatus('error', 0, e.message);
+    console.warn('Firebase init error:', e);
+  }
+}
 
 function startFirestoreListeners() {
   // Watchdog: if no snapshot in 8s, show error
@@ -3511,7 +3528,17 @@ function renderUserTask(c){
       <div class="card" style="margin-bottom:14px;padding:16px">
         <div class="section-head" style="margin-bottom:10px">📎 Task Attachments (${(t.attachments||[]).length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:7px">
-          ${t.attachments.map(a=>`<div class="attach-chip">📄 ${a.name} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></div>`).join('')}
+          ${t.attachments.map(a=>{
+            const url=a.storageUrl||a.dataUrl;
+            const isImg=url&&(a.type||'').startsWith('image/');
+            const isPdf=url&&(a.type==='application/pdf'||(a.name||'').toLowerCase().endsWith('.pdf'));
+            return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 10px;font-size:12px;">` +
+              `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>` +
+              `<span style="color:var(--text)">${a.name} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></span>` +
+              (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>` +
+                   `<a href="${url}" download="${a.name}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'') +
+              `</div>`;
+          }).join('')}
         </div>
       </div>`:''}
 
@@ -3532,7 +3559,17 @@ function renderUserTask(c){
           <div class="reply-item">
             <div><span class="reply-author">${r.author}</span><span class="reply-time">${fmtTime(r.time)}</span></div>
             ${r.text?`<div class="reply-text">${r.text}</div>`:''}
-            ${r.attachments.length?`<div class="reply-attachments">${r.attachments.map(a=>`<div class="attach-chip">📎 ${a.name}</div>`).join('')}</div>`:''}
+            ${r.attachments&&r.attachments.length?`<div class="reply-attachments">${r.attachments.map(a=>{
+              const url=a.storageUrl||a.dataUrl;
+              const isImg=url&&(a.type||'').startsWith('image/');
+              const isPdf=url&&(a.type==='application/pdf'||a.name.toLowerCase().endsWith('.pdf'));
+              return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 8px;font-size:12px;">`+
+                `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>`+
+                `<span style="color:var(--text)">${a.name} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></span>`+
+                (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>`+
+                     `<a href="${url}" download="${a.name}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'<span style="color:var(--text3);margin-left:4px">⚠ no link</span>')+
+                `</div>`;
+            }).join('')}</div>`:''}
           </div>`).join(''):'<div style="color:var(--text3);font-size:13px">No replies yet. Be the first to update!</div>'}
         </div>
       </div>
@@ -3563,6 +3600,56 @@ function userUpdateStatus(s){
   renderUserTask(document.getElementById('content'));
 }
 
+
+// ── Firebase Storage upload helper ──────────────────────────────────────
+/**
+ * Uploads an array of File objects to Firebase Storage under
+ * evidence/{taskId}/{uid}_{filename} and returns an array of attachment
+ * objects with { name, size, type, storageUrl }.
+ * Falls back to base64 dataUrl if Storage is not available.
+ */
+async function uploadFilesToStorage(files, taskId) {
+  const results = [];
+  for (const file of files) {
+    const evId = uid();
+    let storageUrl = null;
+    let dataUrl = null;
+
+    if (window._fbStorage) {
+      try {
+        const path = `evidence/${taskId}/${evId}_${file.name}`;
+        const ref = window._fbStorage.ref(path);
+        await ref.put(file);
+        storageUrl = await ref.getDownloadURL();
+        console.log('✅ Uploaded to Firebase Storage:', path);
+      } catch (err) {
+        console.warn('Storage upload failed, falling back to base64:', err.message);
+      }
+    }
+
+    // Fallback: base64 (same-device only)
+    if (!storageUrl) {
+      dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('FileReader failed'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    results.push({
+      id: evId,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      storageUrl,   // cross-device URL (null if Storage not available)
+      dataUrl,      // base64 fallback (null if storageUrl succeeded)
+      uploadedAt: new Date().toISOString()
+    });
+  }
+  return results;
+}
+
 function handleUserFiles(input){
   const files=Array.from(input.files);
   pendingFiles=[...pendingFiles,...files];
@@ -3579,15 +3666,32 @@ function removePendingFile(i){
   ).join('');
 }
 
-function submitUserReply(){
+async function submitUserReply(){
   const text=document.getElementById('user-reply-text').value.trim();
   if(!text&&pendingFiles.length===0){toast('Please write a reply or attach a file','var(--amber)');return;}
+
+  // Disable send button while uploading
+  const sendBtn = document.querySelector('[onclick="submitUserReply()"]');
+  if(sendBtn){ sendBtn.disabled=true; sendBtn.textContent='Uploading…'; }
+
+  let attachments = [];
+  if(pendingFiles.length > 0){
+    try {
+      attachments = await uploadFilesToStorage(pendingFiles, userTask.id);
+    } catch(err) {
+      console.error('File upload error:', err);
+      toast('Upload failed: ' + err.message, 'var(--red)');
+      if(sendBtn){ sendBtn.disabled=false; sendBtn.textContent='Send Reply →'; }
+      return;
+    }
+  }
+
   const reply={
     id:uid(),
     author:userTask.assignee,
     text,
     time:new Date().toISOString(),
-    attachments:pendingFiles.map(f=>({name:f.name,size:f.size,type:f.type}))
+    attachments
   };
   userTask={...userTask,replies:[...userTask.replies,reply]};
   updateTask(userTask);
@@ -3676,7 +3780,17 @@ function renderDrawerContent(){
   <div class="card-sm" style="margin-bottom:14px">
     <div class="section-head" style="margin-bottom:8px">📎 Attachments (${(t.attachments||[]).length})</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
-      ${t.attachments.map(a=>`<div class="attach-chip">📄 ${a.name}</div>`).join('')}
+      ${t.attachments.map(a=>{
+        const url=a.storageUrl||a.dataUrl;
+        const isImg=url&&(a.type||'').startsWith('image/');
+        const isPdf=url&&(a.type==='application/pdf'||(a.name||'').toLowerCase().endsWith('.pdf'));
+        return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 10px;font-size:12px;">` +
+          `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>` +
+          `<span style="color:var(--text)">${esc(a.name)}</span>` +
+          (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>` +
+               `<a href="${url}" download="${esc(a.name)}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'') +
+          `</div>`;
+      }).join('')}
     </div>
   </div>`:''}
 
@@ -3687,7 +3801,17 @@ function renderDrawerContent(){
       <div class="reply-item">
         <div><span class="reply-author">${r.author}</span><span class="reply-time">${fmtTime(r.time)}</span></div>
         ${r.text?`<div class="reply-text">${r.text}</div>`:''}
-        ${r.attachments&&r.attachments.length?`<div class="reply-attachments">${r.attachments.map(a=>`<div class="attach-chip">📎 ${a.name}</div>`).join('')}</div>`:''}
+        ${r.attachments&&r.attachments.length?`<div class="reply-attachments">${r.attachments.map(a=>{
+          const url=a.storageUrl||a.dataUrl;
+          const isImg=url&&(a.type||'').startsWith('image/');
+          const isPdf=url&&(a.type==='application/pdf'||a.name.toLowerCase().endsWith('.pdf'));
+          return `<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(91,141,238,.08);border:1px solid rgba(91,141,238,.2);border-radius:6px;padding:4px 8px;font-size:12px;">`+
+            `<span>${isImg?'🖼️':isPdf?'📑':'📄'}</span>`+
+            `<span style="color:var(--text)">${esc(a.name)} <span style="color:var(--text3)">(${(a.size/1024).toFixed(0)}KB)</span></span>`+
+            (url?`<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;margin-left:4px">View</a>`+
+                 `<a href="${url}" download="${esc(a.name)}" style="color:var(--text2);text-decoration:none;margin-left:4px">⬇</a>`:'<span style="color:var(--text3);margin-left:4px">⚠ no link</span>')+
+            `</div>`;
+        }).join('')}</div>`:''}
       </div>`).join('')||'<div style="color:var(--text3);font-size:13px;padding:8px 0">No replies yet.</div>'}
     </div>
   </div>
@@ -3769,10 +3893,26 @@ function handleDrawerFiles(input){
   document.getElementById('drawer-file-list').innerHTML=pendingFiles.map(f=>`<div class="attach-chip">📎 ${f.name}</div>`).join('');
 }
 
-function submitDrawerReply(){
+async function submitDrawerReply(){
   const text=document.getElementById('drawer-reply-text').value.trim();
   if(!text&&pendingFiles.length===0){toast('Please write a reply or attach a file','var(--amber)');return;}
-  const reply={id:uid(),author:'Admin',text,time:new Date().toISOString(),attachments:pendingFiles.map(f=>({name:f.name,size:f.size}))};
+
+  const sendBtn = document.querySelector('[onclick="submitDrawerReply()"]');
+  if(sendBtn){ sendBtn.disabled=true; sendBtn.textContent='Uploading…'; }
+
+  let attachments = [];
+  if(pendingFiles.length > 0){
+    try {
+      attachments = await uploadFilesToStorage(pendingFiles, activeDrawerTask.id);
+    } catch(err) {
+      console.error('File upload error:', err);
+      toast('Upload failed: ' + err.message, 'var(--red)');
+      if(sendBtn){ sendBtn.disabled=false; sendBtn.textContent='Send Reply'; }
+      return;
+    }
+  }
+
+  const reply={id:uid(),author:'Admin',text,time:new Date().toISOString(),attachments};
   activeDrawerTask={...activeDrawerTask,replies:[...activeDrawerTask.replies,reply]};
   updateTask(activeDrawerTask);
   pendingFiles=[];
