@@ -551,6 +551,7 @@ let _unsubscribeTasks = null;
           const slbl=document.getElementById('fb-settings-label');
           if(sdot){sdot.style.background='var(--green)';sdot.style.boxShadow='0 0 8px var(--green)';}
           if(slbl){slbl.style.color='var(--green)';slbl.textContent='Connected to Firebase ✓ — '+snap.docs.length+' task(s) synced';}
+          updateDashFbStatus('connected', snap.docs.length);
           if (snap.empty && tasks.length === 0) {
             // First run — seed Firestore with demo data
             const batch = _db.batch();
@@ -596,11 +597,13 @@ let _unsubscribeTasks = null;
           const slbl=document.getElementById('fb-settings-label');
           if(sdot){sdot.style.background='var(--red)';sdot.style.boxShadow='0 0 8px var(--red)';}
           if(slbl){slbl.style.color='var(--red)';slbl.textContent='Firebase error: '+err.message;}
+          updateDashFbStatus('error', 0, err.message);
           console.warn('Firestore error:', err);
         });
       } catch(e) {
         const dot=document.getElementById('fb-dot');
         if(dot){dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';dot.title='Firebase: init failed';}
+        updateDashFbStatus('error', 0, e.message);
         console.warn('Firebase init error:', e);
       }
     };
@@ -741,6 +744,60 @@ function showPanel(name){
   refreshOverdueBadge();
 }
 
+// ── Firebase dashboard status widget updater ──────────────────────────
+let _fbLastSync = null;
+let _fbTaskCount = 0;
+let _fbStatusState = 'connecting'; // 'connecting' | 'connected' | 'error'
+
+function updateDashFbStatus(state, taskCount, errMsg){
+  _fbStatusState = state;
+  if(taskCount !== undefined) _fbTaskCount = taskCount;
+  if(state === 'connected') _fbLastSync = new Date();
+  _applyDashFbStatus();
+}
+
+function _applyDashFbStatus(){
+  const dot    = document.getElementById('dash-fb-dot');
+  const ring   = document.getElementById('dash-fb-ring');
+  const label  = document.getElementById('dash-fb-label');
+  const detail = document.getElementById('dash-fb-detail');
+  const pill   = document.getElementById('dash-fb-tasks-pill');
+  const count  = document.getElementById('dash-fb-tasks-count');
+  const timeEl = document.getElementById('dash-fb-time');
+  if(!dot) return; // widget not rendered yet
+
+  const COLORS = { connecting:'var(--amber)', connected:'var(--green)', error:'var(--red)' };
+  const color = COLORS[_fbStatusState] || COLORS.connecting;
+
+  dot.style.background   = color;
+  dot.style.boxShadow    = '0 0 6px '+color;
+  ring.style.borderColor = color;
+
+  if(_fbStatusState === 'connected'){
+    label.style.color   = 'var(--green)';
+    label.textContent   = '🔥 Firebase: Live';
+    detail.textContent  = 'Real-time sync active';
+    ring.style.animation = 'fbPulse 2s ease-out infinite';
+    if(pill){ pill.style.display='flex'; pill.style.alignItems='center'; }
+    if(count) count.textContent = _fbTaskCount;
+    if(timeEl && _fbLastSync) timeEl.textContent = 'Last sync: ' + _fbLastSync.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } else if(_fbStatusState === 'error'){
+    label.style.color   = 'var(--red)';
+    label.textContent   = '⚠ Firebase: Error';
+    detail.textContent  = arguments[2] || 'Connection failed — using local data';
+    ring.style.animation = 'none';
+    if(pill) pill.style.display='none';
+    if(timeEl) timeEl.textContent = '';
+  } else {
+    label.style.color   = 'var(--text2)';
+    label.textContent   = 'Firebase: Connecting…';
+    detail.textContent  = '';
+    ring.style.animation = 'fbPulse 1.6s ease-out infinite';
+    if(pill) pill.style.display='none';
+    if(timeEl) timeEl.textContent = '';
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════
@@ -758,6 +815,29 @@ function renderDashboard(){
   c.innerHTML=`
   <div class="panel-title fade-in">Command Centre${plantOwnerAuthenticated&&currentPlantSession?' — 🏭 '+esc(currentPlantSession.name):''}</div>
   <div class="panel-sub">Live overview of ${plantOwnerAuthenticated&&currentPlantSession?'your plant tasks':'all tasks'}, team performance, and deadlines</div>
+
+  <!-- ── Firebase Live Status Banner ── -->
+  <div id="dash-fb-status" class="fade-in" style="
+    display:flex;align-items:center;gap:12px;
+    background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    padding:10px 16px;margin-bottom:18px;
+  ">
+    <div id="dash-fb-pulse" style="position:relative;width:10px;height:10px;flex-shrink:0;">
+      <span id="dash-fb-dot" style="display:block;width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px var(--amber);"></span>
+      <span id="dash-fb-ring" style="display:block;position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--amber);opacity:0;animation:fbPulse 1.6s ease-out infinite;"></span>
+    </div>
+    <div style="flex:1;min-width:0;">
+      <span id="dash-fb-label" style="font-size:13px;font-weight:600;color:var(--text2);">Firebase: Connecting…</span>
+      <span id="dash-fb-detail" style="font-size:11px;color:var(--text3);margin-left:10px;"></span>
+    </div>
+    <div id="dash-fb-tasks-pill" style="display:none;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700;color:var(--green);">
+      <span id="dash-fb-tasks-count">0</span> tasks synced
+    </div>
+    <div id="dash-fb-time" style="font-size:11px;color:var(--text3);white-space:nowrap;"></div>
+  </div>
+  <style>
+    @keyframes fbPulse { 0%{transform:scale(1);opacity:.6} 100%{transform:scale(2.2);opacity:0} }
+  </style>
 
   <div class="stats-grid fade-in" id="dash-stats-grid">
     <div class="stat-card" style="--c:var(--accent);cursor:pointer;" onclick="goToTasksFiltered('All','All')" title="View all tasks">
@@ -836,6 +916,9 @@ function renderDashboard(){
     </div>
     <div id="dash-plant-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px"></div>
   </div>`;
+
+  // Re-apply Firebase status to freshly rendered widget
+  _applyDashFbStatus();
 
   // ── Populate "My Tasks" stat card ────────────────────────────────────
   (()=>{
