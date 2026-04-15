@@ -5435,14 +5435,16 @@ async function sendReplyNotificationEmail(task, reply){
   const cfg = getEmailConfig();
   if(!cfg.clientId||!cfg.tenantId) return;
   const adminEmail = localStorage.getItem('admin_notify_email') || '';
-  if(!adminEmail){ console.warn('Admin notify email not set'); return; }
+  // If a plant owner is active, notify their own email; otherwise fall back to admin email
+  const loginHint = getPlantOwnerLoginHint();
+  const plantOwnerEmail = loginHint || (plantOwnerAuthenticated && currentPlantSession ? ((currentPlantSession.owners||[])[0]||'') : '');
+  const notifyEmail = plantOwnerEmail || adminEmail;
+  if(!notifyEmail){ console.warn('No notify email set — skipping reply notification'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
-    // Use plant owner's account if they are the one triggering this action
-    const loginHint = getPlantOwnerLoginHint();
     const token = await withTimeout(getMSGraphToken(cfg, loginHint));
     const bodyHtml = buildEmailHtml(
-      { ...task, assignee: adminEmail, desc: '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)') },
+      { ...task, assignee: notifyEmail, desc: '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)') },
       'updated', taskLink, reply.author + ' replied: ' + (reply.text||'').slice(0,120)
     );
     const res = await withTimeout(fetch('https://graph.microsoft.com/v1.0/me/sendMail',{
@@ -5452,13 +5454,13 @@ async function sendReplyNotificationEmail(task, reply){
         message:{
           subject: '[POLYPLASTICS Tasks] New Reply on Task: ' + task.title,
           body:{ contentType:'HTML', content: bodyHtml },
-          toRecipients:[{ emailAddress:{ address: adminEmail } }]
+          toRecipients:[{ emailAddress:{ address: notifyEmail } }]
         },
         saveToSentItems: false
       })
     }));
     if(!res.ok){ const err=await res.text(); throw new Error('Graph error '+res.status+': '+err); }
-    console.log('Reply notification email sent to admin:', adminEmail, loginHint ? '(from plant owner: '+loginHint+')' : '(from admin account)');
+    console.log('Reply notification email sent to:', notifyEmail, plantOwnerEmail ? '(plant owner)' : '(admin)');
   }catch(e){
     console.warn('Reply notification email failed:', e.message);
   }
@@ -5469,14 +5471,19 @@ async function sendAdminTaskCreationEmail(task){
   const cfg = getEmailConfig();
   if(!cfg.clientId||!cfg.tenantId) return;
   const adminEmail = localStorage.getItem('admin_notify_email') || '';
-  if(!adminEmail){ console.warn('Admin notify email not set — skipping admin creation email'); return; }
+
+  // If a plant owner is creating the task, notify their own email instead of admin email
+  const loginHint = getPlantOwnerLoginHint();
+  const plantOwnerEmail = loginHint || (plantOwnerAuthenticated && currentPlantSession ? ((currentPlantSession.owners||[])[0]||'') : '');
+  const notifyEmail = plantOwnerEmail || adminEmail;
+
+  if(!notifyEmail){ console.warn('No notify email set — skipping task creation email'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
     // Use plant owner's account if they created the task, so it's sent from their mailbox
-    const loginHint = getPlantOwnerLoginHint();
     const token = await withTimeout(getMSGraphToken(cfg, loginHint));
     const bodyHtml = buildEmailHtml(
-      { ...task, assignee: adminEmail, desc: '📋 New task assigned to: ' + task.assignee + '\n\n' + (task.desc||'No description.') },
+      { ...task, assignee: notifyEmail, desc: '📋 New task assigned to: ' + task.assignee + '\n\n' + (task.desc||'No description.') },
       'assigned', taskLink, 'Task created: ' + task.title + ' → assigned to ' + task.assignee
     );
     const res = await withTimeout(fetch('https://graph.microsoft.com/v1.0/me/sendMail',{
@@ -5486,13 +5493,13 @@ async function sendAdminTaskCreationEmail(task){
         message:{
           subject: '[POLYPLASTICS Tasks] New Task Created: ' + task.title,
           body:{ contentType:'HTML', content: bodyHtml },
-          toRecipients:[{ emailAddress:{ address: adminEmail } }]
+          toRecipients:[{ emailAddress:{ address: notifyEmail } }]
         },
         saveToSentItems: false
       })
     }));
     if(!res.ok){ const err=await res.text(); throw new Error('Graph error '+res.status+': '+err); }
-    console.log('Admin task-creation notification sent to:', adminEmail, loginHint ? '(from plant owner: '+loginHint+')' : '(from admin account)');
+    console.log('Task-creation notification sent to:', notifyEmail, plantOwnerEmail ? '(plant owner)' : '(admin)');
   }catch(e){
     console.warn('Admin task-creation email failed:', e.message);
   }
