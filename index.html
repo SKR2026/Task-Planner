@@ -1247,6 +1247,16 @@ function renderPlantPanel(){
   <div class="panel-title fade-in">🏭 ${esc(plant.name)}</div>
   <div class="panel-sub">Owner: <strong style="color:var(--accent)">${esc((plant.owners||[]).join(', ')||'—')}</strong> &nbsp;·&nbsp; ${total} tasks</div>
 
+  ${plantOwnerAuthenticated && owners.length ? `
+  <div id="po-email-banner" class="fade-in" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;margin-bottom:18px;">
+    <div id="po-ms-dot" style="width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px var(--amber);flex-shrink:0;transition:all .3s;"></div>
+    <div style="flex:1;min-width:0;">
+      <span id="po-ms-label" style="font-size:13px;font-weight:600;color:var(--text2);">📧 Email account not signed in — emails will open in your mail client</span><br>
+      <span style="font-size:11px;color:var(--text3);">Sign in with your Microsoft account to send notifications automatically from your own mailbox</span>
+    </div>
+    <button id="po-ms-btn" class="btn btn-ghost btn-sm" onclick="plantOwnerMsSignIn()" style="white-space:nowrap;flex-shrink:0;">🔑 Sign In with Microsoft</button>
+  </div>` : ''}
+
   <div class="stats-grid fade-in">
     <div class="stat-card" style="--c:var(--accent);cursor:pointer;" onclick="renderPlantTaskRows('All')" title="View all tasks"><div class="stat-icon">📋</div><div class="stat-value">${total}</div><div class="stat-label">Total Tasks</div></div>
     <div class="stat-card" style="--c:var(--purple);cursor:pointer;" onclick="renderPlantTaskRows('In Progress')" title="View In Progress tasks"><div class="stat-icon">⚡</div><div class="stat-value">${inprog}</div><div class="stat-label">In Progress</div></div>
@@ -1275,6 +1285,8 @@ function renderPlantPanel(){
   </div>`;
 
   setTimeout(()=>{
+    // Restore plant owner MS sign-in banner status (silent check, no popup)
+    refreshPlantOwnerMsStatus();
     // status chart
     destroyChart('pch-status');
     chartInstances['pch-status']=new Chart(document.getElementById('pch-status'),{
@@ -2298,11 +2310,14 @@ function withTimeout(promise, ms=18000){
 const _msalInstances = {};
 
 /**
- * getMSGraphToken(cfg)
+ * getMSGraphToken(cfg, loginHint)
  * Acquires a delegated Mail.Send token via silent→popup flow.
  * cfg = { clientId, tenantId }  (from getEmailConfig())
+ * loginHint (optional) — force auth for a specific account email (e.g. plant owner).
+ *   When supplied, a separate MSAL instance is used so plant owner tokens are
+ *   fully isolated from the admin's cached session.
  */
-async function getMSGraphToken(cfg) {
+async function getMSGraphToken(cfg, loginHint) {
   if (typeof msal === 'undefined') {
     throw new Error(
       'MS_LOAD_ERROR: MSAL library failed to load. Check your internet connection and refresh. ' +
@@ -2315,7 +2330,10 @@ async function getMSGraphToken(cfg) {
 
   // Redirect URI: full page URL, no hash/query — must match Azure AD App Registration exactly
   const redirectUri = window.location.href.split('?')[0].split('#')[0];
-  const cacheKey    = `${cfg.clientId}::${cfg.tenantId}`;
+  // Separate cache key per account so plant owner tokens never share state with admin tokens
+  const cacheKey = loginHint
+    ? `${cfg.clientId}::${cfg.tenantId}::${loginHint.toLowerCase()}`
+    : `${cfg.clientId}::${cfg.tenantId}`;
 
   if (!_msalInstances[cacheKey]) {
     const inst = new msal.PublicClientApplication({
@@ -2329,34 +2347,70 @@ async function getMSGraphToken(cfg) {
     // initialize() is required in MSAL v2 before any interactive calls
     await inst.initialize();
     _msalInstances[cacheKey] = inst;
-    console.log(`🔑 [MSAL] Instance created — redirectUri: ${redirectUri}`);
+    console.log(`🔑 [MSAL] Instance created — redirectUri: ${redirectUri}${loginHint?' (plant owner: '+loginHint+')':''}`);
   }
 
   const inst    = _msalInstances[cacheKey];
   const request = { scopes: ['Mail.Send', 'User.Read'] };
   const accounts = inst.getAllAccounts();
 
+  // If loginHint is set, prefer the matching account (plant owner's own account)
+  let preferredAccount = accounts.length > 0 ? accounts[0] : null;
+  if (loginHint && accounts.length > 1) {
+    const match = accounts.find(a => a.username.toLowerCase() === loginHint.toLowerCase());
+    if (match) preferredAccount = match;
+  }
+
   // Silent first (uses cached token — no popup)
-  if (accounts.length > 0) {
+  if (preferredAccount) {
     try {
-      const silent = await inst.acquireTokenSilent({ ...request, account: accounts[0] });
+      const silent = await inst.acquireTokenSilent({ ...request, account: preferredAccount });
       return silent.accessToken;
     } catch (_) { /* token expired or interaction required — fall through to popup */ }
   }
 
-  // Interactive popup login
-  const popup = await inst.loginPopup(request);
+  // Interactive popup login — pre-fill the plant owner's email if we have it
+  const popupRequest = loginHint ? { ...request, loginHint } : request;
+  const popup = await inst.loginPopup(popupRequest);
   return popup.accessToken;
+}
+
+/**
+ * getPlantOwnerLoginHint()
+ * Returns the primary owner email of the current plant session (if plant owner is logged in),
+ * to be used as loginHint so emails are sent FROM their own Microsoft account.
+ */
+function getPlantOwnerLoginHint() {
+  if (!plantOwnerAuthenticated || !currentPlantSession) return null;
+  const owners = (currentPlantSession.owners || []).filter(e => e && e.includes('@'));
+  return owners.length > 0 ? owners[0].trim().toLowerCase() : null;
+}
+
+/**
+ * getPlantOwnerMsalInstance()
+ * Returns the cached MSAL instance for the current plant owner's account, or null.
+ */
+function getPlantOwnerMsalInstance() {
+  const hint = getPlantOwnerLoginHint();
+  if (!hint) return null;
+  const c = getEmailConfig();
+  if (!c.clientId || !c.tenantId) return null;
+  return _msalInstances[`${c.clientId}::${c.tenantId}::${hint}`] || null;
 }
 
 /**
  * getMsalInstance()
  * Returns the cached MSAL instance for the current credentials, or null.
+ * When plant owner is active, returns their dedicated instance.
  * Used by the Settings UI status badge.
  */
 function getMsalInstance() {
   const c = getEmailConfig();
   if (!c.clientId || !c.tenantId) return null;
+  const loginHint = getPlantOwnerLoginHint();
+  if (loginHint) {
+    return _msalInstances[`${c.clientId}::${c.tenantId}::${loginHint}`] || null;
+  }
   return _msalInstances[`${c.clientId}::${c.tenantId}`] || null;
 }
 
@@ -2660,8 +2714,10 @@ function buildEmailSubject(reason, taskTitle, task){
 // ── Microsoft Graph send ───────────────────────────────────────────────
 async function sendViaMsGraph(toEmail, subject, htmlBody){
   const cfg = getEmailConfig();
-  // getMSGraphToken handles all cases: not configured, not signed in, token refresh
-  const token = await withTimeout(getMSGraphToken(cfg));
+  // When a plant owner is logged in, acquire the token from their own Microsoft account
+  // so the email is sent FROM the plant owner's mailbox, not the admin's.
+  const loginHint = getPlantOwnerLoginHint();
+  const token = await withTimeout(getMSGraphToken(cfg, loginHint));
   const res = await withTimeout(fetch('https://graph.microsoft.com/v1.0/me/sendMail',{
     method:'POST',
     headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
@@ -2726,7 +2782,10 @@ async function notifyAssignee(task, reason, extra={}){
     try{
       const ok = await sendTaskEmail(task, reason, extra);
       if(ok){
-        toast('📧 Email sent to '+task.assignee+' via '+(transport==='msgraph'?'Microsoft 365':'EmailJS'));
+        const senderLabel = transport==='msgraph'
+          ? ('Microsoft 365' + (getPlantOwnerLoginHint() ? ' (from: '+getPlantOwnerLoginHint()+')' : ''))
+          : 'EmailJS';
+        toast('📧 Email sent to '+task.assignee+' via '+senderLabel);
         return;
       }
     }catch(e){
@@ -2959,6 +3018,91 @@ function plantOwnerLogin(){
     }).catch(()=>doLogin(localPwd));
   } else {
     doLogin(localPwd);
+  }
+}
+
+// ── Plant Owner Microsoft Sign-In ────────────────────────────────────
+/**
+ * plantOwnerMsSignIn()
+ * Triggers Microsoft login for the plant owner's own email account.
+ * After sign-in their token is cached under a separate MSAL instance
+ * so all emails they trigger are sent FROM their own mailbox.
+ */
+async function plantOwnerMsSignIn(){
+  const cfg = getEmailConfig();
+  if(!cfg.clientId || !cfg.tenantId){
+    toast('Microsoft Graph is not configured. Ask your admin to set Client ID & Tenant ID in Settings.', 'var(--amber)');
+    return;
+  }
+  const loginHint = getPlantOwnerLoginHint();
+  const btn  = document.getElementById('po-ms-btn');
+  const dot  = document.getElementById('po-ms-dot');
+  const lbl  = document.getElementById('po-ms-label');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Opening Microsoft login…'; }
+  try{
+    const token = await getMSGraphToken(cfg, loginHint);
+    if(token){
+      // Resolve signed-in username from the MSAL instance
+      const cacheKey = loginHint
+        ? `${cfg.clientId}::${cfg.tenantId}::${loginHint}`
+        : `${cfg.clientId}::${cfg.tenantId}`;
+      const inst = _msalInstances[cacheKey];
+      const accounts = inst ? inst.getAllAccounts() : [];
+      const username = accounts.length ? accounts[0].username : (loginHint || 'your account');
+      if(dot){ dot.style.background='var(--green)'; dot.style.boxShadow='0 0 6px var(--green)'; }
+      if(lbl){ lbl.style.color='var(--green)'; lbl.textContent='✅ Signed in as: ' + username + ' — emails will be sent from your account'; }
+      if(btn){ btn.textContent='⎋ Sign Out'; btn.disabled=false; btn.onclick=plantOwnerMsSignOut; }
+      toast('✅ Signed in — email notifications will be sent from ' + username);
+    }
+  }catch(e){
+    const isFileProtocol = window.location.protocol === 'file:';
+    const hint = isFileProtocol ? ' — Note: Microsoft sign-in requires HTTPS, not a local file.' : '';
+    toast('Sign-in failed: ' + e.message.replace('MS_NOT_CONFIGURED: ','') + hint, 'var(--red)');
+    if(btn){ btn.disabled=false; btn.textContent='🔑 Sign In with Microsoft'; }
+  }
+}
+
+async function plantOwnerMsSignOut(){
+  const cfg = getEmailConfig();
+  const loginHint = getPlantOwnerLoginHint();
+  const cacheKey = loginHint
+    ? `${cfg.clientId}::${cfg.tenantId}::${loginHint}`
+    : `${cfg.clientId}::${cfg.tenantId}`;
+  const inst = _msalInstances[cacheKey];
+  if(inst){
+    try{ await inst.clearCache(); }catch(e){ console.warn('[MSAL PO] sign-out error:', e.message); }
+    delete _msalInstances[cacheKey];
+  }
+  const dot = document.getElementById('po-ms-dot');
+  const lbl = document.getElementById('po-ms-label');
+  const btn = document.getElementById('po-ms-btn');
+  if(dot){ dot.style.background='var(--amber)'; dot.style.boxShadow='0 0 6px var(--amber)'; }
+  if(lbl){ lbl.style.color='var(--text2)'; lbl.textContent='📧 Email account not signed in — emails will open in your mail client'; }
+  if(btn){ btn.textContent='🔑 Sign In with Microsoft'; btn.disabled=false; btn.onclick=plantOwnerMsSignIn; }
+  toast('Signed out from Microsoft');
+}
+
+/**
+ * refreshPlantOwnerMsStatus()
+ * Called after plant owner logs in — checks if they already have a cached
+ * token and updates the banner without forcing a popup.
+ */
+async function refreshPlantOwnerMsStatus(){
+  const cfg = getEmailConfig();
+  if(!cfg.clientId || !cfg.tenantId) return;
+  const loginHint = getPlantOwnerLoginHint();
+  if(!loginHint) return;
+  const cacheKey = `${cfg.clientId}::${cfg.tenantId}::${loginHint}`;
+  const inst = _msalInstances[cacheKey];
+  if(!inst) return; // not yet initialised — nothing to check
+  const accounts = inst.getAllAccounts();
+  if(accounts.length > 0){
+    const dot = document.getElementById('po-ms-dot');
+    const lbl = document.getElementById('po-ms-label');
+    const btn = document.getElementById('po-ms-btn');
+    if(dot){ dot.style.background='var(--green)'; dot.style.boxShadow='0 0 6px var(--green)'; }
+    if(lbl){ lbl.style.color='var(--green)'; lbl.textContent='✅ Signed in as: ' + accounts[0].username + ' — emails will be sent from your account'; }
+    if(btn){ btn.textContent='⎋ Sign Out'; btn.onclick=plantOwnerMsSignOut; }
   }
 }
 
@@ -5294,7 +5438,9 @@ async function sendReplyNotificationEmail(task, reply){
   if(!adminEmail){ console.warn('Admin notify email not set'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
-    const token = await withTimeout(getMSGraphToken(cfg));
+    // Use plant owner's account if they are the one triggering this action
+    const loginHint = getPlantOwnerLoginHint();
+    const token = await withTimeout(getMSGraphToken(cfg, loginHint));
     const bodyHtml = buildEmailHtml(
       { ...task, assignee: adminEmail, desc: '💬 New reply from ' + reply.author + ':\n\n' + (reply.text||'(attachment)') },
       'updated', taskLink, reply.author + ' replied: ' + (reply.text||'').slice(0,120)
@@ -5312,7 +5458,7 @@ async function sendReplyNotificationEmail(task, reply){
       })
     }));
     if(!res.ok){ const err=await res.text(); throw new Error('Graph error '+res.status+': '+err); }
-    console.log('Reply notification email sent to admin:', adminEmail);
+    console.log('Reply notification email sent to admin:', adminEmail, loginHint ? '(from plant owner: '+loginHint+')' : '(from admin account)');
   }catch(e){
     console.warn('Reply notification email failed:', e.message);
   }
@@ -5326,7 +5472,9 @@ async function sendAdminTaskCreationEmail(task){
   if(!adminEmail){ console.warn('Admin notify email not set — skipping admin creation email'); return; }
   const taskLink = window.location.href.split('?')[0] + '?token=' + (task.token||'');
   try{
-    const token = await withTimeout(getMSGraphToken(cfg));
+    // Use plant owner's account if they created the task, so it's sent from their mailbox
+    const loginHint = getPlantOwnerLoginHint();
+    const token = await withTimeout(getMSGraphToken(cfg, loginHint));
     const bodyHtml = buildEmailHtml(
       { ...task, assignee: adminEmail, desc: '📋 New task assigned to: ' + task.assignee + '\n\n' + (task.desc||'No description.') },
       'assigned', taskLink, 'Task created: ' + task.title + ' → assigned to ' + task.assignee
@@ -5344,7 +5492,7 @@ async function sendAdminTaskCreationEmail(task){
       })
     }));
     if(!res.ok){ const err=await res.text(); throw new Error('Graph error '+res.status+': '+err); }
-    console.log('Admin task-creation notification sent to:', adminEmail);
+    console.log('Admin task-creation notification sent to:', adminEmail, loginHint ? '(from plant owner: '+loginHint+')' : '(from admin account)');
   }catch(e){
     console.warn('Admin task-creation email failed:', e.message);
   }
