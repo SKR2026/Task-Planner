@@ -5314,7 +5314,6 @@ function buildDatePickerHTML(inputId, initVal, placeholder) {
         placeholder="${placeholder||'DD-MM-YY'}"
         autocomplete="off"
         oninput="dpHandleTextInput('${inputId}', this.value)"
-        onfocus="dpHandleTextInput('${inputId}', this.value)"
       />
       <button type="button" class="dp-cal-btn" onclick="dpToggle('${inputId}')" title="Pick date from calendar">📅</button>
     </div>
@@ -5365,9 +5364,13 @@ function dpHandleTextInput(inputId, val) {
 function dpToggle(inputId) {
   const existing = document.getElementById('dpcal-'+inputId);
   if(existing) { dpClose(inputId); return; }
-  // Get current value
+  // Get current value — prefer hidden ISO field; fall back to parsing the visible text field
   const hiddenEl = document.getElementById(inputId);
-  const iso = hiddenEl ? hiddenEl.value : '';
+  let iso = hiddenEl ? hiddenEl.value : '';
+  if(!iso) {
+    const textEl = document.getElementById('dptext-'+inputId);
+    if(textEl && textEl.value) iso = parseDDMMYY(textEl.value) || '';
+  }
   let initDate = iso ? new Date(iso+'T00:00:00') : new Date();
   if(isNaN(initDate)) initDate = new Date();
   _dpState[inputId] = {
