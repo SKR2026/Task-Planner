@@ -5380,11 +5380,16 @@ function dpToggle(inputId) {
     view: 'days' // 'days' | 'months' | 'years'
   };
   dpRenderCalendar(inputId);
-  // Close when clicking outside
+  // Close when clicking outside — use composedPath so that nav buttons
+  // which cause the calendar div to be removed+recreated mid-click don't
+  // falsely trigger a close (wrap.contains(e.target) fails for detached nodes).
   setTimeout(() => {
     document.addEventListener('click', function handler(e) {
       const wrap = document.getElementById('dpwrap-'+inputId);
-      if(wrap && !wrap.contains(e.target)) {
+      // composedPath() captures the original path before any DOM mutation
+      const path = e.composedPath ? e.composedPath() : [];
+      const insideWrap = wrap && (wrap.contains(e.target) || path.includes(wrap));
+      if(!insideWrap) {
         dpClose(inputId);
         document.removeEventListener('click', handler);
       }
@@ -5422,9 +5427,9 @@ function dpRenderCalendar(inputId) {
     }
     cal.innerHTML = `
       <div class="dp-nav">
-        <button type="button" class="dp-nav-btn" onclick="dpShiftYearPage('${inputId}',-1)">‹</button>
+        <button type="button" class="dp-nav-btn" onclick="event.stopPropagation();dpShiftYearPage('${inputId}',-1)">‹</button>
         <span class="dp-month-label" style="cursor:default">${startYear}–${startYear+15}</span>
-        <button type="button" class="dp-nav-btn" onclick="dpShiftYearPage('${inputId}',1)">›</button>
+        <button type="button" class="dp-nav-btn" onclick="event.stopPropagation();dpShiftYearPage('${inputId}',1)">›</button>
       </div>
       <div class="dp-year-grid">${yearsHTML}</div>`;
   } else if(state.view === 'months') {
@@ -5433,9 +5438,9 @@ function dpRenderCalendar(inputId) {
       <div class="dp-month-item${i===state.viewMonth?' dp-selected-month':''}" onclick="dpSelectMonth('${inputId}',${i})">${SHORT_MONTHS[i]}</div>`).join('');
     cal.innerHTML = `
       <div class="dp-nav">
-        <button type="button" class="dp-nav-btn" onclick="dpShiftYear('${inputId}',-1)">‹</button>
-        <span class="dp-month-label" onclick="dpSetView('${inputId}','years')">${state.viewYear}</span>
-        <button type="button" class="dp-nav-btn" onclick="dpShiftYear('${inputId}',1)">›</button>
+        <button type="button" class="dp-nav-btn" onclick="event.stopPropagation();dpShiftYear('${inputId}',-1)">‹</button>
+        <span class="dp-month-label" onclick="event.stopPropagation();dpSetView('${inputId}','years')">${state.viewYear}</span>
+        <button type="button" class="dp-nav-btn" onclick="event.stopPropagation();dpShiftYear('${inputId}',1)">›</button>
       </div>
       <div class="dp-month-grid">${monthsHTML}</div>`;
   } else {
@@ -5455,9 +5460,9 @@ function dpRenderCalendar(inputId) {
     }
     cal.innerHTML = `
       <div class="dp-nav">
-        <button type="button" class="dp-nav-btn" onclick="dpShiftMonth('${inputId}',-1)">‹</button>
-        <span class="dp-month-label" onclick="dpSetView('${inputId}','months')">${SHORT_MONTHS[state.viewMonth]} ${state.viewYear}</span>
-        <button type="button" class="dp-nav-btn" onclick="dpShiftMonth('${inputId}',1)">›</button>
+        <button type="button" class="dp-nav-btn" onclick="event.stopPropagation();dpShiftMonth('${inputId}',-1)">‹</button>
+        <span class="dp-month-label" onclick="event.stopPropagation();dpSetView('${inputId}','months')">${SHORT_MONTHS[state.viewMonth]} ${state.viewYear}</span>
+        <button type="button" class="dp-nav-btn" onclick="event.stopPropagation();dpShiftMonth('${inputId}',1)">›</button>
       </div>
       <div class="dp-grid">${daysHTML}</div>`;
   }
