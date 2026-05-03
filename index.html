@@ -359,6 +359,88 @@
   @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
   .fade-in { animation: fadeIn .25s ease; }
 
+  /* ═══════════════════════════════════════════
+     LICENSE GATE OVERLAY
+  ═══════════════════════════════════════════ */
+  #lic-gate {
+    position: fixed; inset: 0; z-index: 99999;
+    background: radial-gradient(ellipse at 40% 30%, #0d1320 0%, #08090d 70%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #lic-gate .lg-wrap { display: flex; flex-direction: column; align-items: center; gap: 28px; }
+  #lic-gate .lg-logo { display: flex; align-items: center; gap: 12px; }
+  #lic-gate .lg-logo-icon {
+    width: 46px; height: 46px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2,#3d6dd4));
+    border-radius: 12px; display: flex; align-items: center;
+    justify-content: center; font-size: 22px;
+    box-shadow: 0 8px 24px rgba(91,141,238,.3);
+  }
+  #lic-gate .lg-logo-name  { font-size: 20px; font-weight: 800; color: var(--text); letter-spacing: -.4px; }
+  #lic-gate .lg-logo-sub   { font-size: 11px; color: var(--text3); letter-spacing: 1.4px; text-transform: uppercase; margin-top: 2px; }
+  #lic-gate .lg-card {
+    background: rgba(24,28,40,.98);
+    border: 1px solid rgba(91,141,238,.2);
+    border-radius: 20px; padding: 42px 46px;
+    width: 400px; max-width: 95vw;
+    box-shadow: 0 32px 80px rgba(0,0,0,.8);
+    position: relative; overflow: hidden;
+  }
+  #lic-gate .lg-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), var(--purple), transparent);
+  }
+  #lic-gate .lg-icon  { font-size: 38px; text-align: center; margin-bottom: 12px; }
+  #lic-gate .lg-title { font-size: 20px; font-weight: 800; color: var(--accent); text-align: center; margin-bottom: 3px; letter-spacing: -.3px; }
+  #lic-gate .lg-sub   { font-size: 11px; color: var(--text3); text-align: center; margin-bottom: 24px; letter-spacing: 1.4px; text-transform: uppercase; }
+  #lic-gate .lg-lbl   { font-size: 11px; font-weight: 700; color: var(--text2); margin-bottom: 6px; letter-spacing: .4px; text-transform: uppercase; }
+  #lic-gate .lg-inp {
+    width: 100%; padding: 12px 15px;
+    background: rgba(8,9,13,.9); border: 1.5px solid var(--border2);
+    color: var(--text); border-radius: 9px;
+    font-family: 'DM Sans', monospace; font-size: 15px;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    transition: border-color .2s; outline: none;
+  }
+  #lic-gate .lg-inp:focus { border-color: var(--accent); }
+  #lic-gate .lg-inp::placeholder { letter-spacing: 1px; text-transform: none; color: var(--text3); font-size: 13px; }
+  #lic-gate .lg-btn {
+    width: 100%; margin-top: 14px; padding: 13px;
+    border: none; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2,#3d6dd4));
+    color: #fff; font-family: var(--font-body); font-size: 14px;
+    font-weight: 700; cursor: pointer; transition: all .2s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  #lic-gate .lg-btn:hover { opacity: .9; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(91,141,238,.4); }
+  #lic-gate .lg-spin {
+    width: 17px; height: 17px; border: 2px solid rgba(255,255,255,.3);
+    border-top-color: #fff; border-radius: 50%;
+    animation: lgSpin .7s linear infinite; display: none;
+  }
+  #lic-gate .lg-btn.loading .lg-lbl { display: none; }
+  #lic-gate .lg-btn.loading .lg-spin { display: block; }
+  @keyframes lgSpin { to { transform: rotate(360deg); } }
+  #lic-gate .lg-err {
+    margin-top: 10px; padding: 9px 13px; border-radius: 7px;
+    background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.25);
+    color: #fca5a5; font-size: 12px; display: none;
+  }
+  #lic-gate .lg-err.show { display: block; }
+  #lic-gate .lg-hint {
+    margin-top: 18px; padding: 10px 14px;
+    background: rgba(91,141,238,.06); border: 1px solid rgba(91,141,238,.14);
+    border-radius: 8px; font-size: 11px; color: var(--text3);
+    line-height: 1.8; text-align: center;
+  }
+  #lic-gate .lg-hint strong { color: var(--text2); }
+  #lic-gate .lg-ok-badge {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px 16px; background: rgba(52,211,153,.08);
+    border: 1px solid rgba(52,211,153,.25); border-radius: 9px;
+    font-size: 13px; font-weight: 600; color: var(--green); margin-top: 14px;
+  }
+
   /* ─── custom date picker ─── */
   .datepicker-wrap { position: relative; }
   .datepicker-wrap .dp-input-row { display: flex; align-items: center; gap: 0; }
@@ -455,6 +537,45 @@
 </style>
 </head>
 <body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     LICENSE GATE — shown before the app on every load
+     Validates key against Firestore developer_licenses collection
+     (same Firebase project: skr-task)
+═══════════════════════════════════════════════════════════ -->
+<div id="lic-gate">
+  <div class="lg-wrap">
+    <div class="lg-logo">
+      <div class="lg-logo-icon">🗂️</div>
+      <div>
+        <div class="lg-logo-name">Task Planner</div>
+        <div class="lg-logo-sub">POLYPLASTICS</div>
+      </div>
+    </div>
+    <div class="lg-card">
+      <div class="lg-icon">🔑</div>
+      <div class="lg-title">Software License</div>
+      <div class="lg-sub">Enter your license key to continue</div>
+      <div class="lg-lbl">License Key</div>
+      <input class="lg-inp" id="lic-key-inp" type="text" maxlength="20"
+        placeholder="TP-XXXX-XXXX-XXXX"
+        onkeydown="if(event.key==='Enter')licSubmit()"
+        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9\-]/g,'')">
+      <div class="lg-err" id="lic-err">Invalid or expired license key. Please contact your administrator.</div>
+      <button class="lg-btn" id="lic-btn" onclick="licSubmit()">
+        <div class="lg-spin"></div>
+        <span class="lg-lbl">Activate &amp; Continue</span>
+      </button>
+      <div id="lic-ok-wrap" style="display:none">
+        <div class="lg-ok-badge">✓ License valid — launching app…</div>
+      </div>
+      <div class="lg-hint">
+        <strong>Licensed software.</strong><br>
+        Contact your administrator if you need a license key.
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="toast">✓ Action completed</div>
 
@@ -644,7 +765,7 @@ function initFirebaseCore() {
       .then(() => {
         console.log('Firebase anonymous auth OK');
         _fbReady = true;
-        startFirestoreListeners();
+        checkLicense(); // ← validate license before launching app
       })
       .catch(e => {
         updateDashFbStatus('error', 0, 'Auth sign-in failed: ' + e.message);
@@ -655,6 +776,119 @@ function initFirebaseCore() {
     if(dot){ dot.style.background='var(--red)'; dot.style.boxShadow='0 0 8px var(--red)'; dot.title='Firebase: init failed'; }
     updateDashFbStatus('error', 0, e.message);
     console.warn('Firebase init error:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LICENSE GATE
+//  — Validates key against Firestore 'developer_licenses' collection
+//  — Same Firebase project (skr-task) — no extra setup required
+//  — Key stored in localStorage after first valid entry (user not asked again)
+//  — SuperAdmin creates/manages keys via Developer_Licensing_Panel.html
+// ═══════════════════════════════════════════════════════════════════════
+const _LIC_COLL    = 'developer_licenses';
+const _LIC_STORE   = 'tp_license_key';
+const _LIC_EXPIRY  = 'tp_license_expiry';
+
+async function checkLicense() {
+  const savedKey = localStorage.getItem(_LIC_STORE);
+
+  if (savedKey) {
+    // Silently re-validate saved key on every load
+    const ok = await _licValidate(savedKey, true);
+    if (ok) { _licLaunch(); return; }
+    // Key was revoked / expired — clear it and ask again
+    localStorage.removeItem(_LIC_STORE);
+    localStorage.removeItem(_LIC_EXPIRY);
+  }
+
+  // Show the gate (it's already visible by default)
+  const inp = document.getElementById('lic-key-inp');
+  if (inp) inp.focus();
+}
+
+async function _licValidate(key, silent) {
+  if (!key || key.length < 6) return false;
+  try {
+    const doc = await _db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).get();
+    if (!doc.exists) return false;
+    const d = doc.data();
+    if (!d.isActive) return false;
+    // Check expiry
+    if (d.expiryDate) {
+      const exp = d.expiryDate.toDate ? d.expiryDate.toDate() : new Date(d.expiryDate);
+      if (new Date() > exp) return false;
+    }
+    // Record activation if this is the first time this key is used here
+    if (!silent) {
+      try {
+        await _db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).update({
+          activationCount: firebase.firestore.FieldValue.increment(1),
+          lastActivated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } catch(e) { /* non-fatal */ }
+    }
+    // Cache expiry locally so we can show a warning before it expires
+    if (d.expiryDate) {
+      const exp = d.expiryDate.toDate ? d.expiryDate.toDate() : new Date(d.expiryDate);
+      localStorage.setItem(_LIC_EXPIRY, exp.toISOString());
+    }
+    return true;
+  } catch(e) {
+    console.warn('License check error:', e.message);
+    // On network error with a saved key — allow offline grace (don't block)
+    return !!localStorage.getItem(_LIC_STORE);
+  }
+}
+
+function _licLaunch() {
+  const gate = document.getElementById('lic-gate');
+  if (gate) {
+    gate.style.transition = 'opacity .4s ease';
+    gate.style.opacity = '0';
+    setTimeout(() => { gate.style.display = 'none'; }, 420);
+  }
+  startFirestoreListeners();
+  // Show expiry warning if within 30 days
+  const expStr = localStorage.getItem(_LIC_EXPIRY);
+  if (expStr) {
+    const exp = new Date(expStr);
+    const dl  = Math.ceil((exp - new Date()) / 86400000);
+    if (dl <= 30 && dl > 0) {
+      setTimeout(() => toast(`⚠ License expires in ${dl} day${dl===1?'':'s'} — contact admin to renew`, 'var(--amber)'), 3000);
+    }
+  }
+}
+
+function _licShowErr(msg) {
+  const el = document.getElementById('lic-err');
+  if (el) { el.textContent = msg; el.classList.add('show'); }
+}
+
+async function licSubmit() {
+  const inp = document.getElementById('lic-key-inp');
+  const btn = document.getElementById('lic-btn');
+  const key = inp ? inp.value.trim().toUpperCase() : '';
+
+  document.getElementById('lic-err').classList.remove('show');
+
+  if (!key) { _licShowErr('Please enter your license key.'); return; }
+  if (key.length < 6) { _licShowErr('License key is too short. Format: TP-XXXX-XXXX-XXXX'); return; }
+
+  btn.classList.add('loading');
+  btn.disabled = true;
+
+  const ok = await _licValidate(key, false);
+
+  if (ok) {
+    localStorage.setItem(_LIC_STORE, key);
+    document.getElementById('lic-ok-wrap').style.display = 'block';
+    btn.style.display = 'none';
+    setTimeout(() => _licLaunch(), 900);
+  } else {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    _licShowErr('Invalid, expired, or revoked license key. Please contact your administrator.');
   }
 }
 
