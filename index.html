@@ -782,35 +782,64 @@ function initFirebaseCore() {
 // ═══════════════════════════════════════════════════════════════════════
 //  LICENSE GATE
 //  — Validates key against Firestore 'developer_licenses' collection
-//  — Same Firebase project (skr-task) — no extra setup required
-//  — Key stored in localStorage after first valid entry (user not asked again)
+//  — Uses Firebase project: skr-legal (where Developer Panel saves keys)
+//  — The app's own project (skr-task) is separate — handled by _db
+//  — Key stored in localStorage after first valid entry (not asked again)
 //  — SuperAdmin creates/manages keys via Developer_Licensing_Panel.html
 // ═══════════════════════════════════════════════════════════════════════
-const _LIC_COLL    = 'developer_licenses';
-const _LIC_STORE   = 'tp_license_key';
-const _LIC_EXPIRY  = 'tp_license_expiry';
+const _LIC_COLL   = 'developer_licenses';
+const _LIC_STORE  = 'tp_license_key';
+const _LIC_EXPIRY = 'tp_license_expiry';
+
+// ── Separate Firebase app for license DB (skr-legal project) ──────────
+// The Developer Licensing Panel writes to skr-legal.
+// We must read from the same project — NOT from skr-task.
+const _LIC_FB_CONFIG = {
+  apiKey:            "AIzaSyDeXLjY5K9o-DflzkUrfJ1uw2dMpq0lyMY",
+  authDomain:        "skr-legal.firebaseapp.com",
+  projectId:         "skr-legal",
+  storageBucket:     "skr-legal.firebasestorage.app",
+  messagingSenderId: "906193634469",
+  appId:             "1:906193634469:web:0cca89b8495b283ce7f94c"
+};
+
+let _licDb = null;
+
+function _getLicDb() {
+  if (_licDb) return _licDb;
+  try {
+    // Use a named app 'lic' so it doesn't clash with the main skr-task app
+    const existing = firebase.apps.find(a => a.name === 'lic');
+    const licApp = existing || firebase.initializeApp(_LIC_FB_CONFIG, 'lic');
+    _licDb = licApp.firestore();
+    // Sign in anonymously on the lic app too (Firestore rules require auth)
+    licApp.auth().signInAnonymously().catch(() => {});
+  } catch(e) {
+    console.warn('License DB init error:', e.message);
+  }
+  return _licDb;
+}
 
 async function checkLicense() {
   const savedKey = localStorage.getItem(_LIC_STORE);
-
   if (savedKey) {
-    // Silently re-validate saved key on every load
     const ok = await _licValidate(savedKey, true);
     if (ok) { _licLaunch(); return; }
-    // Key was revoked / expired — clear it and ask again
+    // Key was revoked / expired — clear and ask again
     localStorage.removeItem(_LIC_STORE);
     localStorage.removeItem(_LIC_EXPIRY);
   }
-
-  // Show the gate (it's already visible by default)
+  // Gate is already visible by default — just focus the input
   const inp = document.getElementById('lic-key-inp');
   if (inp) inp.focus();
 }
 
 async function _licValidate(key, silent) {
   if (!key || key.length < 6) return false;
+  const db = _getLicDb();
+  if (!db) { console.warn('License DB not ready'); return false; }
   try {
-    const doc = await _db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).get();
+    const doc = await db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).get();
     if (!doc.exists) return false;
     const d = doc.data();
     if (!d.isActive) return false;
@@ -819,16 +848,16 @@ async function _licValidate(key, silent) {
       const exp = d.expiryDate.toDate ? d.expiryDate.toDate() : new Date(d.expiryDate);
       if (new Date() > exp) return false;
     }
-    // Record activation if this is the first time this key is used here
+    // Record activation on first use
     if (!silent) {
       try {
-        await _db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).update({
+        await db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).update({
           activationCount: firebase.firestore.FieldValue.increment(1),
-          lastActivated: firebase.firestore.FieldValue.serverTimestamp()
+          lastActivated:   firebase.firestore.FieldValue.serverTimestamp()
         });
       } catch(e) { /* non-fatal */ }
     }
-    // Cache expiry locally so we can show a warning before it expires
+    // Cache expiry locally for renewal warning
     if (d.expiryDate) {
       const exp = d.expiryDate.toDate ? d.expiryDate.toDate() : new Date(d.expiryDate);
       localStorage.setItem(_LIC_EXPIRY, exp.toISOString());
@@ -836,8 +865,8 @@ async function _licValidate(key, silent) {
     return true;
   } catch(e) {
     console.warn('License check error:', e.message);
-    // On network error with a saved key — allow offline grace (don't block)
-    return !!localStorage.getItem(_LIC_STORE);
+    // Offline grace: only allow if key was previously validated and saved
+    return silent && !!localStorage.getItem(_LIC_STORE);
   }
 }
 
