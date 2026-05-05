@@ -3973,13 +3973,14 @@ function renderUserDashboard(c){
       <button class="btn btn-ghost btn-sm" onclick="handleLogout()" style="color:var(--red);border-color:rgba(248,113,113,.3);">⎋ Logout</button>
     </div>
 
-    <div class="stats-grid fade-in" style="margin-bottom:22px">
-      <div class="stat-card" style="--c:var(--accent)"><div class="stat-icon">📋</div><div class="stat-value">${myTasks.length}</div><div class="stat-label">My Tasks</div></div>
-      <div class="stat-card" style="--c:var(--purple)"><div class="stat-icon">⚡</div><div class="stat-value">${inprog}</div><div class="stat-label">In Progress</div></div>
-      <div class="stat-card" style="--c:var(--amber)"><div class="stat-icon">👁</div><div class="stat-value">${review}</div><div class="stat-label">In Review</div></div>
-      <div class="stat-card" style="--c:var(--green)"><div class="stat-icon">✅</div><div class="stat-value">${done}</div><div class="stat-label">Completed</div></div>
-      <div class="stat-card" style="--c:var(--red)"><div class="stat-icon">🚨</div><div class="stat-value">${overdue}</div><div class="stat-label">Overdue</div></div>
-      <div class="stat-card" style="--c:var(--cyan)"><div class="stat-icon">📈</div><div class="stat-value">${rate}%</div><div class="stat-label">Completion Rate</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin-bottom:22px;" class="fade-in">
+      ${[['My Tasks','all',myTasks.length,'var(--accent)','📋'],['In Progress','In Progress',inprog,'var(--purple)','⚡'],['In Review','Review',review,'var(--amber)','👁'],['Completed','Done',done,'var(--green)','✅'],['Overdue','overdue',overdue,'var(--red)','🚨']].map(([l,f,v,col,icon])=>`
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s;" onclick="filterUserDashboard('${f}')"
+           onmouseover="this.style.borderColor='${col}';this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)';this.style.transform=''">
+        <div style="font-size:18px;margin-bottom:4px;">${icon}</div>
+        <div style="font-size:22px;font-weight:800;color:${col}">${v}</div>
+        <div style="font-size:11px;color:var(--text3);font-weight:600;margin-top:2px;">${l}</div>
+      </div>`).join('')}
     </div>
 
     <div class="card fade-in" style="margin-bottom:18px;padding:16px 20px">
@@ -3988,26 +3989,71 @@ function renderUserDashboard(c){
       <div style="font-size:11px;color:var(--text3);margin-top:6px">${done} of ${myTasks.length} tasks completed</div>
     </div>
 
-    <div class="panel-title fade-in" style="font-size:16px;margin-bottom:12px">My Tasks</div>
-    <div id="user-task-list" class="fade-in">
-    ${myTasks.length===0?'<div class="empty"><div class="empty-icon">🎉</div><div>No tasks assigned to you!</div></div>':
-      [...myTasks].sort((a,b)=>(a.due||'').localeCompare(b.due||'')).map(t=>`
-      <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openUserTaskDetail('${t.id}')">
-        <div class="task-row-body">
-          <div class="task-title">${t.title}</div>
-          <div class="task-meta">
-            <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
-            ${(t.replies||[]).length?`<span>💬 ${(t.replies||[]).length}</span>`:''}
-            ${isOverdue(t)?'<span style="color:var(--red);font-weight:600">Overdue</span>':''}
-          </div>
-        </div>
-        <div class="task-actions" onclick="event.stopPropagation()">
-          <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
-          <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
-        </div>
-      </div>`).join('')}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;" class="fade-in">
+      <div class="panel-title" style="font-size:16px;margin-bottom:0">My Tasks</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:12px;color:var(--text3);">Showing:</span>
+        <span id="user-task-filter-label" style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:10px;background:rgba(91,141,238,.12);color:var(--accent);">All</span>
+      </div>
     </div>
+    <div id="user-task-list" class="fade-in"></div>
   </div>`;
+}
+
+  renderUserTaskList('all');
+}
+
+function filterUserDashboard(filter){
+  const PILL_CONFIG = {
+    'all':         {text:'All',          bg:'rgba(91,141,238,.12)',   color:'var(--accent)'},
+    'To Do':       {text:'To Do',        bg:'rgba(156,163,176,.12)', color:'var(--text2)'},
+    'In Progress': {text:'In Progress',  bg:'rgba(167,139,250,.15)', color:'var(--purple)'},
+    'Review':      {text:'In Review',    bg:'rgba(251,191,36,.13)',  color:'var(--amber)'},
+    'Done':        {text:'Completed',    bg:'rgba(52,211,153,.13)',  color:'var(--green)'},
+    'overdue':     {text:'Overdue',      bg:'rgba(248,113,113,.15)', color:'var(--red)'},
+  };
+  const lbl = document.getElementById('user-task-filter-label');
+  if(lbl){
+    const cfg = PILL_CONFIG[filter] || PILL_CONFIG['all'];
+    lbl.textContent = cfg.text;
+    lbl.style.background = cfg.bg;
+    lbl.style.color = cfg.color;
+  }
+  renderUserTaskList(filter);
+}
+
+function renderUserTaskList(filter){
+  const el = document.getElementById('user-task-list');
+  if(!el) return;
+  const myTasks = tasks.filter(t => t.assignee.toLowerCase() === userEmail.toLowerCase());
+  let filtered;
+  if(filter === 'overdue'){
+    filtered = myTasks.filter(isOverdue);
+  } else if(filter === 'all'){
+    filtered = myTasks;
+  } else {
+    filtered = myTasks.filter(t => t.status === filter);
+  }
+  filtered = [...filtered].sort((a,b) => (a.due||'').localeCompare(b.due||''));
+  if(filtered.length === 0){
+    el.innerHTML = '<div class="empty"><div class="empty-icon">🎉</div><div>No tasks in this category!</div></div>';
+    return;
+  }
+  el.innerHTML = filtered.map(t => `
+    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openUserTaskDetail('${t.id}')">
+      <div class="task-row-body">
+        <div class="task-title">${t.title}</div>
+        <div class="task-meta">
+          <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
+          ${(t.replies||[]).length ? `<span>💬 ${(t.replies||[]).length}</span>` : ''}
+          ${isOverdue(t) ? '<span style="color:var(--red);font-weight:600">Overdue</span>' : ''}
+        </div>
+      </div>
+      <div class="task-actions" onclick="event.stopPropagation()">
+        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
+        <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
+      </div>
+    </div>`).join('');
 }
 
 function openUserTaskDetail(id){
