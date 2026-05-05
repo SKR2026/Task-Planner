@@ -804,16 +804,20 @@ const _LIC_FB_CONFIG = {
 };
 
 let _licDb = null;
+let _licAuthReady = false;
 
-function _getLicDb() {
-  if (_licDb) return _licDb;
+async function _getLicDb() {
+  if (_licDb && _licAuthReady) return _licDb;
   try {
     // Use a named app 'lic' so it doesn't clash with the main skr-task app
     const existing = firebase.apps.find(a => a.name === 'lic');
     const licApp = existing || firebase.initializeApp(_LIC_FB_CONFIG, 'lic');
     _licDb = licApp.firestore();
-    // Sign in anonymously on the lic app too (Firestore rules require auth)
-    licApp.auth().signInAnonymously().catch(() => {});
+    if (!_licAuthReady) {
+      // Await anonymous sign-in so Firestore rules pass before any query
+      await licApp.auth().signInAnonymously();
+      _licAuthReady = true;
+    }
   } catch(e) {
     console.warn('License DB init error:', e.message);
   }
@@ -836,7 +840,7 @@ async function checkLicense() {
 
 async function _licValidate(key, silent) {
   if (!key || key.length < 6) return false;
-  const db = _getLicDb();
+  const db = await _getLicDb();
   if (!db) { console.warn('License DB not ready'); return false; }
   try {
     const doc = await db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).get();
@@ -3998,62 +4002,7 @@ function renderUserDashboard(c){
     </div>
     <div id="user-task-list" class="fade-in"></div>
   </div>`;
-}
-
   renderUserTaskList('all');
-}
-
-function filterUserDashboard(filter){
-  const PILL_CONFIG = {
-    'all':         {text:'All',          bg:'rgba(91,141,238,.12)',   color:'var(--accent)'},
-    'To Do':       {text:'To Do',        bg:'rgba(156,163,176,.12)', color:'var(--text2)'},
-    'In Progress': {text:'In Progress',  bg:'rgba(167,139,250,.15)', color:'var(--purple)'},
-    'Review':      {text:'In Review',    bg:'rgba(251,191,36,.13)',  color:'var(--amber)'},
-    'Done':        {text:'Completed',    bg:'rgba(52,211,153,.13)',  color:'var(--green)'},
-    'overdue':     {text:'Overdue',      bg:'rgba(248,113,113,.15)', color:'var(--red)'},
-  };
-  const lbl = document.getElementById('user-task-filter-label');
-  if(lbl){
-    const cfg = PILL_CONFIG[filter] || PILL_CONFIG['all'];
-    lbl.textContent = cfg.text;
-    lbl.style.background = cfg.bg;
-    lbl.style.color = cfg.color;
-  }
-  renderUserTaskList(filter);
-}
-
-function renderUserTaskList(filter){
-  const el = document.getElementById('user-task-list');
-  if(!el) return;
-  const myTasks = tasks.filter(t => t.assignee.toLowerCase() === userEmail.toLowerCase());
-  let filtered;
-  if(filter === 'overdue'){
-    filtered = myTasks.filter(isOverdue);
-  } else if(filter === 'all'){
-    filtered = myTasks;
-  } else {
-    filtered = myTasks.filter(t => t.status === filter);
-  }
-  filtered = [...filtered].sort((a,b) => (a.due||'').localeCompare(b.due||''));
-  if(filtered.length === 0){
-    el.innerHTML = '<div class="empty"><div class="empty-icon">🎉</div><div>No tasks in this category!</div></div>';
-    return;
-  }
-  el.innerHTML = filtered.map(t => `
-    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openUserTaskDetail('${t.id}')">
-      <div class="task-row-body">
-        <div class="task-title">${t.title}</div>
-        <div class="task-meta">
-          <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
-          ${(t.replies||[]).length ? `<span>💬 ${(t.replies||[]).length}</span>` : ''}
-          ${isOverdue(t) ? '<span style="color:var(--red);font-weight:600">Overdue</span>' : ''}
-        </div>
-      </div>
-      <div class="task-actions" onclick="event.stopPropagation()">
-        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
-        <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
-      </div>
-    </div>`).join('');
 }
 
 function openUserTaskDetail(id){
@@ -5588,6 +5537,58 @@ function goToTasksFilteredByAssignee(status, email){
   document.getElementById('btn-export').style.display='flex';
   document.getElementById('topbar-title').textContent='All Tasks';
   renderTasks();
+}
+
+function filterUserDashboard(filter){
+  const PILL_CONFIG = {
+    'all':         {text:'All',          bg:'rgba(91,141,238,.12)',   color:'var(--accent)'},
+    'In Progress': {text:'In Progress',  bg:'rgba(167,139,250,.15)', color:'var(--purple)'},
+    'Review':      {text:'In Review',    bg:'rgba(251,191,36,.13)',  color:'var(--amber)'},
+    'Done':        {text:'Completed',    bg:'rgba(52,211,153,.13)',  color:'var(--green)'},
+    'overdue':     {text:'Overdue',      bg:'rgba(248,113,113,.15)', color:'var(--red)'},
+  };
+  const lbl = document.getElementById('user-task-filter-label');
+  if(lbl){
+    const cfg = PILL_CONFIG[filter] || PILL_CONFIG['all'];
+    lbl.textContent = cfg.text;
+    lbl.style.background = cfg.bg;
+    lbl.style.color = cfg.color;
+  }
+  renderUserTaskList(filter);
+}
+
+function renderUserTaskList(filter){
+  const el = document.getElementById('user-task-list');
+  if(!el) return;
+  const myTasks = tasks.filter(t => t.assignee.toLowerCase() === userEmail.toLowerCase());
+  let filtered;
+  if(filter === 'overdue'){
+    filtered = myTasks.filter(isOverdue);
+  } else if(filter === 'all'){
+    filtered = myTasks;
+  } else {
+    filtered = myTasks.filter(t => t.status === filter);
+  }
+  filtered = [...filtered].sort((a,b) => (a.due||'').localeCompare(b.due||''));
+  if(filtered.length === 0){
+    el.innerHTML = '<div class="empty"><div class="empty-icon">🎉</div><div>No tasks in this category!</div></div>';
+    return;
+  }
+  el.innerHTML = filtered.map(t => `
+    <div class="task-row" style="--lc:${PRIO_COLOR[t.priority]}" onclick="openUserTaskDetail('${t.id}')">
+      <div class="task-row-body">
+        <div class="task-title">${t.title}</div>
+        <div class="task-meta">
+          <span>📅 <span style="color:${isOverdue(t)?'var(--red)':'inherit'}">${fmt(t.due)}</span></span>
+          ${(t.replies||[]).length ? `<span>💬 ${(t.replies||[]).length}</span>` : ''}
+          ${isOverdue(t) ? '<span style="color:var(--red);font-weight:600">Overdue</span>' : ''}
+        </div>
+      </div>
+      <div class="task-actions" onclick="event.stopPropagation()">
+        <span class="badge ${prioBadgeClass(t.priority)}">${t.priority}</span>
+        <span class="badge ${statusBadgeClass(t.status)}">${t.status}</span>
+      </div>
+    </div>`).join('');
 }
 
 // ── Navigate dashboard My Tasks stat → filtered My Tasks panel ───────
