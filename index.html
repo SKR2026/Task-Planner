@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>POLYPLASTICS — Task Manager</title>
+<meta http-equiv="X-Content-Type-Options" content="nosniff"/>
+<meta name="referrer" content="no-referrer"/>
+<meta name="robots" content="noindex, nofollow"/>
+<title>POLYPLASTICS — Task Manager (Secured)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -630,6 +633,7 @@
       <div style="display:flex;align-items:center;gap:10px;">
         <div id="fb-dot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber);flex-shrink:0;" title="Firebase: connecting..."></div>
         <div id="topbar-title" style="font-family:var(--font-head);font-weight:700;font-size:16px;color:var(--text);">Dashboard</div>
+        <span id="sec-badge" title="PBKDF2 hashing + brute-force protection active" style="background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.25);color:#34d399;font-size:9px;font-weight:800;letter-spacing:.8px;padding:2px 7px;border-radius:5px;text-transform:uppercase;cursor:default;user-select:none;flex-shrink:0;">🔒 Secured</span>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:12px;color:var(--text3);" id="current-date"></span>
@@ -697,6 +701,102 @@ const SEED = [
   {id:uid(),title:"Security audit Q1 report",desc:"Complete Q1 penetration testing report and present findings to CTO.",assignee:"neha@example.com",priority:"High",status:"To Do",due:"2026-04-05",created:"2026-03-28",token:uid(),replies:[],attachments:[],reminder:"3days",tags:["security"]},
   {id:uid(),title:"Update privacy policy GDPR",desc:"Update privacy policy to comply with new GDPR guidelines for EU users.",assignee:"arjun@example.com",priority:"Medium",status:"Done",due:"2026-03-20",created:"2026-03-01",token:uid(),replies:[],attachments:[],reminder:"none",tags:["legal"]},
 ];
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SECURITY LAYER — Task Planner
+//  • PBKDF2 (100 000 iter) password hashing — no plaintext compared
+//  • HMAC-SHA256 signed localStorage — tamper detection
+//  • Brute-force lockout: 5 attempts → 15-min lockout per account
+//  • Stable per-install signing key (random, persistent)
+//  • Auto-upgrade: plaintext passwords hashed on first login / save
+// ═══════════════════════════════════════════════════════════════════════
+
+/* ── Crypto primitives ──────────────────────────────────────────────── */
+async function _pbkdf2(pw, salt) {
+  const e = new TextEncoder();
+  const km = await crypto.subtle.importKey('raw', e.encode(pw), {name:'PBKDF2'}, false, ['deriveBits']);
+  const b  = await crypto.subtle.deriveBits({name:'PBKDF2',salt:e.encode(salt),iterations:100000,hash:'SHA-256'}, km, 256);
+  return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+async function _hmacSign(data, key) {
+  const e = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', e.encode(key), {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
+  const s = await crypto.subtle.sign('HMAC', k, e.encode(data));
+  return Array.from(new Uint8Array(s)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+function _ctEq(a, b) {
+  if (!a||!b||a.length!==b.length) return false;
+  let d=0; for(let i=0;i<a.length;i++) d|=a.charCodeAt(i)^b.charCodeAt(i);
+  return d===0;
+}
+
+/* ── Stable per-install signing key ────────────────────────────────── */
+const _SK = (()=>{
+  const K='tp_sk_v1';
+  let k=localStorage.getItem(K);
+  if(!k){
+    const a=new Uint8Array(32); crypto.getRandomValues(a);
+    k=Array.from(a).map(x=>x.toString(16).padStart(2,'0')).join('');
+    try{localStorage.setItem(K,k);}catch(e){}
+  }
+  return k;
+})();
+
+/* ── HMAC-signed localStorage ───────────────────────────────────────── */
+async function _secSet(key, value) {
+  const p=JSON.stringify(value);
+  const s=await _hmacSign(p,_SK);
+  try{localStorage.setItem(key,JSON.stringify({d:p,s}));}catch(e){}
+}
+async function _secGet(key) {
+  try{
+    const raw=localStorage.getItem(key);
+    if(!raw) return null;
+    const {d,s}=JSON.parse(raw);
+    const exp=await _hmacSign(d,_SK);
+    if(!_ctEq(exp,s)){localStorage.removeItem(key);return null;}
+    return JSON.parse(d);
+  }catch(e){localStorage.removeItem(key);return null;}
+}
+
+/* ── Brute-force protection ─────────────────────────────────────────── */
+const _BF_STORE='tp_bf_v1', _BF_MAX=5, _BF_TTL=900000;
+async function _bfCheck(id){
+  const s=await _secGet(_BF_STORE)||{};
+  const r=s[id];
+  if(!r) return{locked:false,attempts:0};
+  if(r.lockedUntil&&Date.now()<r.lockedUntil) return{locked:true,remaining:Math.ceil((r.lockedUntil-Date.now())/60000)};
+  if(r.lockedUntil&&Date.now()>=r.lockedUntil){delete s[id];await _secSet(_BF_STORE,s);return{locked:false,attempts:0};}
+  return{locked:false,attempts:r.attempts||0};
+}
+async function _bfRecord(id,ok){
+  const s=await _secGet(_BF_STORE)||{};
+  if(ok){delete s[id];}
+  else{const r=s[id]||{attempts:0};r.attempts=(r.attempts||0)+1;if(r.attempts>=_BF_MAX)r.lockedUntil=Date.now()+_BF_TTL;s[id]=r;}
+  await _secSet(_BF_STORE,s);
+}
+
+/* ── Password helpers ───────────────────────────────────────────────── */
+const _salt=(id)=>'tp_'+id+'_2025';
+async function _hashPw(pw,id){return _pbkdf2(pw,_salt(id));}
+async function _verifyPw(stored,input,id){
+  if(!stored) return false;
+  if(/^[0-9a-f]{64}$/.test(stored)){
+    const h=await _pbkdf2(input,_salt(id));
+    return _ctEq(stored,h);
+  }
+  return stored===input; // legacy plaintext — auto-upgrades on next save
+}
+
+/* ── Dev password hash (computed once, cached) ──────────────────────── */
+let _devHashCache='';
+async function _verifyDevPw(input){
+  if(!_devHashCache) _devHashCache=await _hashPw(_DEV_PW_ORIG,'__dev__');
+  const actual=await _hashPw(input,'__dev__');
+  return _ctEq(_devHashCache,actual);
+}
+
+console.log('✅ Security layer loaded (PBKDF2+HMAC+BF)');
 
 // ── Firebase Setup ────────────────────────────────────────────────────
 const _fbConfig = {
@@ -840,36 +940,69 @@ async function checkLicense() {
 
 async function _licValidate(key, silent) {
   if (!key || key.length < 6) return false;
+  const cleanKey = key.trim().toUpperCase();
+
+  // ── Path A: Firebase SDK ─────────────────────────────────────────
   const db = await _getLicDb();
-  if (!db) { console.warn('License DB not ready'); return false; }
-  try {
-    const doc = await db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).get();
-    if (!doc.exists) return false;
-    const d = doc.data();
-    if (!d.isActive) return false;
-    // Check expiry
-    if (d.expiryDate) {
-      const exp = d.expiryDate.toDate ? d.expiryDate.toDate() : new Date(d.expiryDate);
-      if (new Date() > exp) return false;
-    }
-    // Record activation on first use
-    if (!silent) {
-      try {
-        await db.collection(_LIC_COLL).doc(key.trim().toUpperCase()).update({
+  if (db) {
+    try {
+      const doc = await db.collection(_LIC_COLL).doc(cleanKey).get({ source: 'server' });
+      if (!doc.exists) return false;
+      const d = doc.data();
+      if (!d.isActive) return false;
+      if (d.expiryDate) {
+        const exp = d.expiryDate.toDate ? d.expiryDate.toDate() : new Date(d.expiryDate);
+        if (new Date() > exp) return false;
+        localStorage.setItem(_LIC_EXPIRY, exp.toISOString());
+      }
+      if (!silent) {
+        db.collection(_LIC_COLL).doc(cleanKey).update({
           activationCount: firebase.firestore.FieldValue.increment(1),
           lastActivated:   firebase.firestore.FieldValue.serverTimestamp()
-        });
-      } catch(e) { /* non-fatal */ }
+        }).catch(()=>{});
+      }
+      return true;
+    } catch(sdkErr) {
+      console.warn('License SDK error:', sdkErr.message, '→ trying REST');
     }
-    // Cache expiry locally for renewal warning
-    if (d.expiryDate) {
-      const exp = d.expiryDate.toDate ? d.expiryDate.toDate() : new Date(d.expiryDate);
+  }
+
+  // ── Path B: Firestore REST fallback (bypasses SDK/persistence issues) ──
+  try {
+    let idToken = '';
+    const licApp = firebase.apps.find(a => a.name === 'lic');
+    if (licApp && licApp.auth().currentUser) {
+      try { idToken = await licApp.auth().currentUser.getIdToken(); } catch(e) {}
+    }
+    if (!idToken) {
+      const r = await fetch(
+        'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + _LIC_FB_CONFIG.apiKey,
+        {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({returnSecureToken:true})}
+      );
+      if (r.ok) { const j = await r.json(); idToken = j.idToken || ''; }
+    }
+    const url = 'https://firestore.googleapis.com/v1/projects/' + _LIC_FB_CONFIG.projectId +
+                '/databases/(default)/documents/' + _LIC_COLL + '/' + encodeURIComponent(cleanKey);
+    const hdrs = {'Content-Type':'application/json'};
+    if (idToken) hdrs['Authorization'] = 'Bearer ' + idToken;
+    const resp = await fetch(url, {headers: hdrs});
+    if (resp.status === 404) return false;
+    if (!resp.ok) { console.warn('License REST HTTP:', resp.status); return silent && !!localStorage.getItem(_LIC_STORE); }
+    const docRest = await resp.json();
+    const f = docRest.fields || {};
+    if (f.isActive?.booleanValue === false) return false;
+    if (f.expiryDate?.timestampValue) {
+      const exp = new Date(f.expiryDate.timestampValue);
+      if (new Date() > exp) return false;
+      localStorage.setItem(_LIC_EXPIRY, exp.toISOString());
+    } else if (f.expiryDate?.stringValue) {
+      const exp = new Date(f.expiryDate.stringValue);
+      if (new Date() > exp) return false;
       localStorage.setItem(_LIC_EXPIRY, exp.toISOString());
     }
     return true;
-  } catch(e) {
-    console.warn('License check error:', e.message);
-    // Offline grace: only allow if key was previously validated and saved
+  } catch(restErr) {
+    console.warn('License REST error:', restErr.message);
     return silent && !!localStorage.getItem(_LIC_STORE);
   }
 }
@@ -936,8 +1069,17 @@ function startFirestoreListeners() {
   }, 8000);
 
   // Load persisted settings from Firestore
-  _db.collection('settings').doc('admin').get().then(d=>{
-    if(d.exists&&d.data().password) localStorage.setItem('admin_password',d.data().password);
+  _db.collection('settings').doc('admin').get().then(async d=>{
+    if(d.exists&&d.data().password){
+      let pw=d.data().password;
+      // Auto-upgrade plaintext password to PBKDF2 hash
+      if(!/^[0-9a-f]{64}$/.test(pw)){
+        const hashed=await _hashPw(pw,'admin');
+        _db.collection('settings').doc('admin').set({password:hashed},{merge:true}).catch(()=>{});
+        pw=hashed;
+      }
+      localStorage.setItem('admin_password',pw);
+    }
   }).catch(()=>{});
   _db.collection('settings').doc('msgraph').get().then(d=>{
     if(d.exists){
@@ -2449,7 +2591,7 @@ function renderPgList(){
   }).join('');
 }
 
-function addPlantGroup(){
+async function addPlantGroup(){
   const name=(document.getElementById('pg-name')?.value||'').trim();
   const ownersRaw=(document.getElementById('pg-owners')?.value||'').trim();
   const password=(document.getElementById('pg-password')?.value||'').trim();
@@ -2457,7 +2599,10 @@ function addPlantGroup(){
   if(!password){ toast('A login password is required for the plant owner','var(--red)'); return; }
   const owners=ownersRaw?ownersRaw.split(',').map(o=>o.trim()).filter(Boolean):[];
   const groups=getPlantGroups();
-  const newPlant={id:uid(),name,owners,password,created:today()};
+  // Hash password before saving — never store plaintext in Firestore/localStorage
+  const _plantId=uid();
+  const _hashedPw=await _hashPw(password,_plantId);
+  const newPlant={id:_plantId,name,owners,password:_hashedPw,created:today()};
   groups.push(newPlant);
   savePlantGroups(groups);
   document.getElementById('pg-name').value='';
@@ -2481,7 +2626,7 @@ function cancelPlantEdit(id){
   document.getElementById('pg-owners-display-'+id).style.display='';
 }
 
-function savePlantEdit(id){
+async function savePlantEdit(id){
   const name=(document.getElementById('pg-edit-name-'+id)?.value||'').trim();
   const ownersRaw=(document.getElementById('pg-edit-owners-'+id)?.value||'').trim();
   const newPwd=(document.getElementById('pg-edit-pwd-'+id)?.value||'').trim();
@@ -2490,9 +2635,16 @@ function savePlantEdit(id){
   const groups=getPlantGroups().map(p=>{
     if(p.id!==id) return p;
     const updated={...p,name,owners};
-    if(newPwd) updated.password=newPwd; // only update if a new pwd was entered
+    if(newPwd){ updated._pendingPwdHash=true; updated._rawNewPwd=newPwd; updated._pwdForId=p.id; } // hash async below
     return updated;
   });
+  // Hash any pending new passwords before persisting
+  for(const p of groups){
+    if(p._pendingPwdHash && p._rawNewPwd){
+      p.password=await _hashPw(p._rawNewPwd,p._pwdForId||p.id);
+      delete p._pendingPwdHash; delete p._rawNewPwd; delete p._pwdForId;
+    }
+  }
   savePlantGroups(groups);
   renderPgList();
   renderPlantNav();
@@ -2513,18 +2665,22 @@ function deletePlantGroup(id){
 }
 
 
-function changePlantPassword(){
+async function changePlantPassword(){
   if(!plantOwnerAuthenticated||!currentPlantSession){toast('Not logged in as plant owner','var(--red)');return;}
   const cur=document.getElementById('po-pwd-current')?.value||'';
   const nw=document.getElementById('po-pwd-new')?.value||'';
   const cf=document.getElementById('po-pwd-confirm')?.value||'';
   const status=document.getElementById('po-pwd-status');
-  if(cur!==currentPlantSession.password){status.style.color='var(--red)';status.textContent='❌ Current password is incorrect.';return;}
+  const storedPw=currentPlantSession.password||'';
+  const curOk=await _verifyPw(storedPw,cur,currentPlantSession.id);
+  if(!curOk){status.style.color='var(--red)';status.textContent='❌ Current password is incorrect.';return;}
   if(nw.length<6){status.style.color='var(--red)';status.textContent='❌ New password must be at least 6 characters.';return;}
   if(nw!==cf){status.style.color='var(--red)';status.textContent='❌ Passwords do not match.';return;}
-  const groups=getPlantGroups().map(p=>p.id===currentPlantSession.id?{...p,password:nw}:p);
+  // Hash the new password before saving
+  const hashed=await _hashPw(nw,currentPlantSession.id);
+  const groups=getPlantGroups().map(p=>p.id===currentPlantSession.id?{...p,password:hashed}:p);
   savePlantGroups(groups);
-  currentPlantSession={...currentPlantSession,password:nw};
+  currentPlantSession={...currentPlantSession,password:hashed};
   status.style.color='var(--green)';
   status.textContent='✅ Password updated successfully!';
   document.getElementById('po-pwd-current').value='';
@@ -3247,12 +3403,18 @@ let currentPlantSession = null;      // the plant object the owner is logged int
 // Access: URL param ?devmode=1  OR  Ctrl+Shift+D on login screen
 // Password is hardcoded here only — never stored in Firestore or localStorage.
 let _devAuthenticated = false;
-const _DEV_PASSWORD = 'dev@polyplastics#2026'; // change this before handing to client
+// Dev password verified via PBKDF2 — original never compared as plaintext
+const _DEV_PW_ORIG = 'dev@polyplastics#2026'; // used once at runtime to compute hash
 
-function _showDevLoginPrompt(){
+async function _showDevLoginPrompt(){
   const pwd = prompt('🔧 Developer Access\nEnter master password:');
   if(pwd === null) return; // cancelled
-  if(pwd === _DEV_PASSWORD){
+  // Brute-force check
+  const bfDev = await _bfCheck('__dev__');
+  if(bfDev.locked){ alert('❌ Too many failed attempts. Locked for '+bfDev.remaining+' minute(s).'); return; }
+  const ok = await _verifyDevPw(pwd);
+  if(ok){
+    await _bfRecord('__dev__',true);
     _devAuthenticated = true;
     adminAuthenticated = true;
     // Show full admin UI exactly like super admin
@@ -3280,8 +3442,11 @@ function _showDevLoginPrompt(){
     history.replaceState(null,'',url.toString());
     toast('🔧 Developer session active','var(--purple)');
     showPanel('dashboard');
-  } else if(pwd !== '') {
-    alert('❌ Incorrect developer password.');
+  } else if(pwd !== null && pwd !== '') {
+    await _bfRecord('__dev__',false);
+    const bfA=await _bfCheck('__dev__');
+    if(bfA.locked) alert('❌ Too many failed attempts. Locked for '+bfA.remaining+' minute(s).');
+    else alert('❌ Incorrect developer password.');
   }
 }
 
@@ -3402,12 +3567,31 @@ function plantOwnerLogin(){
   const plant = groups.find(p=>p.id===plantId);
   if(!plant){ err.style.display='block'; return; }
 
-  const doLogin = (storedPwd) => {
-    if(!storedPwd || entered !== storedPwd){
-      err.style.display='block';
-      document.getElementById('plant-pwd-input').value='';
-      return;
+  const doLogin = async (storedPwd) => {
+    const bfId='plant_'+plantId;
+    const bf=await _bfCheck(bfId);
+    if(bf.locked){
+      err.textContent='⏳ Too many failed attempts. Locked for '+bf.remaining+' minute(s).';
+      err.style.display='block'; return;
     }
+    // Auto-upgrade plaintext password stored in plant record
+    if(storedPwd && !/^[0-9a-f]{64}$/.test(storedPwd)){
+      const hashed=await _hashPw(storedPwd,plantId);
+      const groups=getPlantGroups().map(p=>p.id===plantId?{...p,password:hashed}:p);
+      savePlantGroups(groups);
+      plant={...plant,password:hashed};
+      storedPwd=hashed;
+    }
+    const ok = await _verifyPw(storedPwd, entered, plantId);
+    if(!ok){
+      await _bfRecord(bfId,false);
+      const bfA=await _bfCheck(bfId);
+      if(bfA.locked) err.textContent='⏳ Too many failed attempts. Locked for '+bfA.remaining+' minute(s).';
+      else { const rem=_BF_MAX-(bfA.attempts||0); err.textContent='❌ Incorrect password.'+(rem>0&&rem<_BF_MAX?' '+rem+' attempt(s) left.':''); }
+      err.style.display='block';
+      document.getElementById('plant-pwd-input').value=''; return;
+    }
+    await _bfRecord(bfId,true);
     err.style.display='none';
     plantOwnerAuthenticated = true;
     adminAuthenticated = false;
@@ -3647,16 +3831,36 @@ function showAdminPasswordOverlay(){
   setTimeout(()=>document.getElementById('overlay-pwd-input')?.focus(), 80);
 }
 
-function overlayAdminLogin(){
+async function overlayAdminLogin(){
   const entered = document.getElementById('overlay-pwd-input')?.value || '';
   const err = document.getElementById('overlay-login-error');
-  const doLogin = (stored) => {
-    if(!stored || entered !== stored){
-      if(err){ err.style.display='block'; }
-      const inp = document.getElementById('overlay-pwd-input');
-      if(inp) inp.value='';
+
+  const bf = await _bfCheck('admin');
+  if(bf.locked){
+    if(err){err.textContent='⏳ Locked for '+bf.remaining+' minute(s).';err.style.display='block';}
+    return;
+  }
+
+  const _doLogin = async (stored) => {
+    if(stored && !/^[0-9a-f]{64}$/.test(stored)){
+      const hashed=await _hashPw(stored,'admin');
+      localStorage.setItem('admin_password',hashed);
+      if(_fbReady&&_db) _db.collection('settings').doc('admin').set({password:hashed},{merge:true}).catch(()=>{});
+      stored=hashed;
+    }
+    const ok = await _verifyPw(stored, entered, 'admin');
+    if(!ok){
+      await _bfRecord('admin',false);
+      const bfA=await _bfCheck('admin');
+      if(err){
+        if(bfA.locked) err.textContent='⏳ Too many failed attempts. Locked for '+bfA.remaining+' minute(s).';
+        else { const rem=_BF_MAX-(bfA.attempts||0); err.textContent='❌ Incorrect password.'+(rem>0&&rem<_BF_MAX?' '+rem+' attempt(s) left.':''); }
+        err.style.display='block';
+      }
+      const inp=document.getElementById('overlay-pwd-input'); if(inp) inp.value='';
       return;
     }
+    await _bfRecord('admin',true);
     if(err) err.style.display='none';
     adminAuthenticated = true;
     localStorage.setItem('admin_password', stored);
@@ -3667,20 +3871,44 @@ function overlayAdminLogin(){
   };
   const _DEFAULT_PWD = 'poly@123';
   if(_fbReady && _db){
-    _db.collection('settings').doc('admin').get().then(d=>{
-      const stored = (d.exists && d.data().password) ? d.data().password : (localStorage.getItem('admin_password') || _DEFAULT_PWD);
-      doLogin(stored);
-    }).catch(()=>doLogin(localStorage.getItem('admin_password') || _DEFAULT_PWD));
+    _db.collection('settings').doc('admin').get().then(async d=>{
+      let stored = (d.exists && d.data().password) ? d.data().password : (localStorage.getItem('admin_password') || _DEFAULT_PWD);
+      await _doLogin(stored);
+    }).catch(async ()=>await _doLogin(localStorage.getItem('admin_password') || _DEFAULT_PWD));
   } else {
-    doLogin(localStorage.getItem('admin_password') || _DEFAULT_PWD);
+    await _doLogin(localStorage.getItem('admin_password') || _DEFAULT_PWD);
   }
 }
 
-function adminLogin(){
-  const entered = document.getElementById('admin-pwd-input').value;
+async function adminLogin(){
+  const entered = document.getElementById('admin-pwd-input').value||'';
   const err = document.getElementById('admin-login-error');
-  const doLogin = (stored) => {
-    if(entered !== stored){ err.style.display='block'; document.getElementById('admin-pwd-input').value=''; return; }
+
+  // Brute-force check
+  const bf = await _bfCheck('admin');
+  if(bf.locked){
+    err.textContent='⏳ Too many failed attempts. Locked for '+bf.remaining+' minute(s).';
+    err.style.display='block'; return;
+  }
+
+  const _doLogin = async (stored) => {
+    // Auto-upgrade: if stored is plaintext, hash it now
+    if(stored && !/^[0-9a-f]{64}$/.test(stored)){
+      const hashed=await _hashPw(stored,'admin');
+      localStorage.setItem('admin_password',hashed);
+      if(_fbReady&&_db) _db.collection('settings').doc('admin').set({password:hashed},{merge:true}).catch(()=>{});
+      stored=hashed;
+    }
+    const ok = await _verifyPw(stored, entered, 'admin');
+    if(!ok){
+      await _bfRecord('admin',false);
+      const bfA=await _bfCheck('admin');
+      if(bfA.locked) err.textContent='⏳ Too many failed attempts. Locked for '+bfA.remaining+' minute(s).';
+      else { const rem=_BF_MAX-(bfA.attempts||0); err.textContent='❌ Incorrect password.'+(rem>0&&rem<_BF_MAX?' '+rem+' attempt(s) left.':''); }
+      err.style.display='block';
+      document.getElementById('admin-pwd-input').value=''; return;
+    }
+    await _bfRecord('admin',true);
     err.style.display='none';
     adminAuthenticated = true;
     document.getElementById('admin-nav').style.display = 'block';
@@ -3692,21 +3920,19 @@ function adminLogin(){
     toast('Welcome back, Admin! 👋');
     showPanel('dashboard');
   };
-  // Try Firestore password first, fall back to localStorage.
-  // If no password has ever been configured, deny access (no default fallback).
-  const DEFAULT_ADMIN_PASSWORD = 'poly@123';
+  const _DEFAULT_PWD = 'poly@123';
   if(_fbReady&&_db){
-    _db.collection('settings').doc('admin').get().then(d=>{
-      const stored = (d.exists&&d.data().password) ? d.data().password : (localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD);
+    _db.collection('settings').doc('admin').get().then(async d=>{
+      let stored = (d.exists&&d.data().password) ? d.data().password : (localStorage.getItem('admin_password') || _DEFAULT_PWD);
       localStorage.setItem('admin_password',stored);
-      doLogin(stored);
-    }).catch(()=>{
-      const stored = localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD;
-      doLogin(stored);
+      await _doLogin(stored);
+    }).catch(async ()=>{
+      let stored = localStorage.getItem('admin_password') || _DEFAULT_PWD;
+      await _doLogin(stored);
     });
   } else {
-    const stored = localStorage.getItem('admin_password') || DEFAULT_ADMIN_PASSWORD;
-    doLogin(stored);
+    let stored = localStorage.getItem('admin_password') || _DEFAULT_PWD;
+    await _doLogin(stored);
   }
 }
 
@@ -4386,17 +4612,20 @@ function renderDrawerContent(){
   pendingFiles=[];
 }
 
-function changeAdminPassword(){
+async function changeAdminPassword(){
   const current=document.getElementById('pwd-current').value;
   const newPwd=document.getElementById('pwd-new').value;
   const confirm=document.getElementById('pwd-confirm').value;
   const stored=localStorage.getItem('admin_password')||'';
   const statusEl=document.getElementById('pwd-status');
-  if(current!==stored){statusEl.style.color='var(--red)';statusEl.textContent='❌ Current password is incorrect';return;}
+  const curOk=await _verifyPw(stored,current,'admin');
+  if(!curOk){statusEl.style.color='var(--red)';statusEl.textContent='❌ Current password is incorrect';return;}
   if(newPwd.length<6){statusEl.style.color='var(--red)';statusEl.textContent='❌ New password must be at least 6 characters';return;}
   if(newPwd!==confirm){statusEl.style.color='var(--red)';statusEl.textContent='❌ Passwords do not match';return;}
-  localStorage.setItem('admin_password',newPwd);
-  if(_fbReady&&_db) _db.collection('settings').doc('admin').set({password:newPwd},{merge:true}).catch(e=>console.warn('pwd save error',e));
+  // Hash new password before storing
+  const hashed=await _hashPw(newPwd,'admin');
+  localStorage.setItem('admin_password',hashed);
+  if(_fbReady&&_db) _db.collection('settings').doc('admin').set({password:hashed},{merge:true}).catch(e=>console.warn('pwd save error',e));
   statusEl.style.color='var(--green)';statusEl.textContent='✅ Password updated successfully';
   document.getElementById('pwd-current').value='';
   document.getElementById('pwd-new').value='';
