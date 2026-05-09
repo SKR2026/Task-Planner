@@ -398,12 +398,14 @@
   #lic-gate .lg-sub   { font-size: 11px; color: var(--text3); text-align: center; margin-bottom: 24px; letter-spacing: 1.4px; text-transform: uppercase; }
   #lic-gate .lg-lbl   { font-size: 11px; font-weight: 700; color: var(--text2); margin-bottom: 6px; letter-spacing: .4px; text-transform: uppercase; }
   #lic-gate .lg-inp {
+    display: block;
     width: 100%; padding: 12px 15px;
     background: rgba(8,9,13,.9); border: 1.5px solid var(--border2);
     color: var(--text); border-radius: 9px;
     font-family: 'DM Sans', monospace; font-size: 15px;
     letter-spacing: 2.5px; text-transform: uppercase;
     transition: border-color .2s; outline: none;
+    box-sizing: border-box; min-height: 46px;
   }
   #lic-gate .lg-inp:focus { border-color: var(--accent); }
   #lic-gate .lg-inp::placeholder { letter-spacing: 1px; text-transform: none; color: var(--text3); font-size: 13px; }
@@ -559,11 +561,14 @@
       <div class="lg-icon">🔑</div>
       <div class="lg-title">Software License</div>
       <div class="lg-sub">Enter your license key to continue</div>
-      <div class="lg-lbl">License Key</div>
-      <input class="lg-inp" id="lic-key-inp" type="text" maxlength="20"
-        placeholder="TP-XXXX-XXXX-XXXX"
-        onkeydown="if(event.key==='Enter')licSubmit()"
-        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9\-]/g,'')">
+      <div style="width:100%;margin-bottom:4px;">
+        <div class="lg-lbl">License Key</div>
+        <input class="lg-inp" id="lic-key-inp" type="text" maxlength="20"
+          placeholder="TP-XXXX-XXXX-XXXX"
+          style="display:block;width:100%;box-sizing:border-box;"
+          onkeydown="if(event.key==='Enter')licSubmit()"
+          oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9\-]/g,'')">
+      </div>
       <div class="lg-err" id="lic-err">Invalid or expired license key. Please contact your administrator.</div>
       <button class="lg-btn" id="lic-btn" onclick="licSubmit()">
         <div class="lg-spin"></div>
